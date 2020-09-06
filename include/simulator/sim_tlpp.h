@@ -45,16 +45,9 @@ typedef std::queue<int> Dep_q_t;
  * \brief simulate core level pipe line parallism logic.
  */
 class TlppVerify {
-   public:
+ public:
     /*! Return TlppVefiy class instance.*/
-    // jun@
-    // static TlppVerify *Global() { static TlppVerify Cls; return &Cls;}
-    static TlppVerify* Local() {
-        TlppVerify* new_inst = new TlppVerify;
-        new_inst->inst = new_inst;
-        return new_inst;
-    }
-    TlppVerify* Inst() { return inst; }
+    static TlppVerify *Global() { static TlppVerify Cls; return &Cls;}
 
     /*!
      *  \brief Loop to process instruction and verify tlpp logic.
@@ -75,7 +68,7 @@ class TlppVerify {
     /*! \ Schedule a paticular core to run. */
     void CoreRun(CORE_TYPE core_type);
 
-   private:
+ private:
     /*! TlppVerify construction function.*/
     TlppVerify();
     /*!
@@ -132,7 +125,7 @@ class TlppVerify {
         bool pop_prev, bool pop_next,
         bool push_prev, bool push_next,
         Dep_q_t *pop_prev_q, Dep_q_t *pop_next_q,
-        Dep_q_t *push_prev_q, Dep_q_t *push_next_q,                           
+        Dep_q_t *push_prev_q, Dep_q_t *push_next_q,
         CORE_TYPE push_to_prev_q_indx, CORE_TYPE push_to_next_q_indx);
     /*!
      * \ brief , return name based on core type.
@@ -164,8 +157,5 @@ class TlppVerify {
     int done_;
     /*! event queue for core wake up*/
     std::queue<CORE_TYPE> dep_push_event_;
-
-    // jun@
-    TlppVerify* inst{nullptr};
 };
 #endif  // VTA_SIM_TLPP_H_

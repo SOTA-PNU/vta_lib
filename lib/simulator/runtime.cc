@@ -35,7 +35,7 @@
 #include <vector>
 #include <memory>
 
-#include <vta/runtime.h>
+#include <runtime.h>
 
 namespace vta {
 

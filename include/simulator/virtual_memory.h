@@ -47,45 +47,37 @@ namespace vmem {
  *  Implements simple paging to allow physical address translation.
  */
 class VirtualMemoryManager {
-   public:
-    // jun@ return new instance
-    static VirtualMemoryManager* Local() {
-        VirtualMemoryManager* new_inst = new VirtualMemoryManager;
-        new_inst->inst = new_inst;
-        return new_inst;
-    }
-    VirtualMemoryManager* Inst() { return inst; }
-
-    /*!
-     * \brief Get virtual address given physical address.
-     * \param phy_addr The simulator phyiscal address.
-     * \return The true virtual address;
-     */
-    void* GetAddr(uint64_t phy_addr);
-    /*!
-     * \brief Get physical address
-     * \param buf The virtual address.
-     * \return The true physical address;
-     */
-    vta_phy_addr_t GetPhyAddr(void* buf);
-    /*!
-     * \brief Allocate memory from manager
-     * \param size The size of memory
-     * \return The virtual address
-     */
-    void* Alloc(size_t size);
-    /*!
-     * \brief Free the memory.
-     * \param size The size of memory
-     * \return The virtual address
-     */
-    void Free(void* data);
-    /*!
-     * \brief Copy from the host memory to device memory (virtual).
-     * \param dst The device memory address (virtual)
-     * \param src The host memory address
-     * \param size The size of memory
-     */
+ public:
+  /*!
+   * \brief Get virtual address given physical address.
+   * \param phy_addr The simulator phyiscal address.
+   * \return The true virtual address;
+   */
+  void* GetAddr(uint64_t phy_addr);
+  /*!
+   * \brief Get physical address
+   * \param buf The virtual address.
+   * \return The true physical address;
+   */
+  vta_phy_addr_t GetPhyAddr(void* buf);
+  /*!
+   * \brief Allocate memory from manager
+   * \param size The size of memory
+   * \return The virtual address
+   */
+  void* Alloc(size_t size);
+  /*!
+   * \brief Free the memory.
+   * \param size The size of memory
+   * \return The virtual address
+   */
+  void Free(void* data);
+  /*!
+   * \brief Copy from the host memory to device memory (virtual).
+   * \param dst The device memory address (virtual)
+   * \param src The host memory address
+   * \param size The size of memory
+   */
   void MemCopyFromHost(void* dst, const void * src, size_t size);
   /*!
    * \brief Copy from the device memory (virtual) to host memory.
@@ -94,47 +86,40 @@ class VirtualMemoryManager {
    * \param size The size of memory
    */
   void MemCopyToHost(void* dst, const void * src, size_t size);
+  static VirtualMemoryManager* Global();
 
-    // jun@ singleton pattern is not used for multi-device sim.
-    static VirtualMemoryManager* Global();
-
-   private:
-    //@jun instance of DRAM
-    VirtualMemoryManager* inst{nullptr};
-
-    //@jun. assume that all device have same VTA_PAGE_BITS and VTA_PAGE_BYTES
-
-    // The bits in page table
-    static constexpr vta_phy_addr_t kPageBits = VTA_PAGE_BITS;
-    // page size, also the maximum allocable size 16 K
-    static constexpr vta_phy_addr_t kPageSize = VTA_PAGE_BYTES;
-    /*! \brief A page in the DRAM */
-    struct Page {
-        /*! \brief Data Type */
-        using DType = typename std::aligned_storage<kPageSize, 256>::type;
-        /*! \brief Start location in page table */
-        size_t ptable_begin;
-        /*! \brief The total number of pages */
-        size_t num_pages;
-        /*! \brief Data */
-        DType* data{nullptr};
-        // construct a new page
-        explicit Page(size_t ptable_begin, size_t num_pages)
-            : ptable_begin(ptable_begin), num_pages(num_pages) {
-            data = new DType[num_pages];
-        }
-        ~Page() {
-            delete [] data;
-        }
-    };
-    // Internal lock
-    std::mutex mutex_;
-    // Physical address -> page
-    std::vector<Page*> ptable_;
-    // virtual addres -> page
-    std::unordered_map<void*, std::unique_ptr<Page> > pmap_;
-    // Free map
-    std::multimap<size_t, Page*> free_map_;
+ private:
+  // The bits in page table
+  static constexpr vta_phy_addr_t kPageBits = VTA_PAGE_BITS;
+  // page size, also the maximum allocable size 16 K
+  static constexpr vta_phy_addr_t kPageSize = VTA_PAGE_BYTES;
+  /*! \brief A page in the DRAM */
+  struct Page {
+    /*! \brief Data Type */
+    using DType = typename std::aligned_storage<kPageSize, 256>::type;
+    /*! \brief Start location in page table */
+    size_t ptable_begin;
+    /*! \brief The total number of pages */
+    size_t num_pages;
+    /*! \brief Data */
+    DType* data{nullptr};
+    // construct a new page
+    explicit Page(size_t ptable_begin, size_t num_pages)
+        : ptable_begin(ptable_begin), num_pages(num_pages) {
+      data = new DType[num_pages];
+    }
+    ~Page() {
+      delete [] data;
+    }
+  };
+  // Internal lock
+  std::mutex mutex_;
+  // Physical address -> page
+  std::vector<Page*> ptable_;
+  // virtual addres -> page
+  std::unordered_map<void*, std::unique_ptr<Page> > pmap_;
+  // Free map
+  std::multimap<size_t, Page*> free_map_;
 };
 
 
