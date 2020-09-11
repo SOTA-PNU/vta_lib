@@ -5,11 +5,12 @@ INCLUDE_DIRECTORIES(include 3rdparty/dlpack/include)
 INCLUDE_DIRECTORIES(include 3rdparty/dmlc-core/include)
 
 if(GLOW_WITH_VTASIM)
+    add_definitions(-DGLOW_WITH_VTASIM=1)
     INCLUDE_DIRECTORIES(include include/simulator)
     add_library(vta_runtime lib/simulator/runtime.cc lib/simulator/sim_driver.cc lib/simulator/virtual_memory.cc lib/simulator/sim_tlpp.cc)
-
     add_subdirectory(tests/simtests)
 else()
+    add_definitions(-DGLOW_WITH_VTASIM=0)
     add_definitions(-DDMLC_USE_FOPEN64=0
             -DVTA_TARGET=zcu102
             -DVTA_HW_VER=0.0.1
