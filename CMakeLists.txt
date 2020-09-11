@@ -51,3 +51,6 @@ else()
     add_subdirectory(tests/zcu102)
 endif()
 
+add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle.cpp)
+target_link_libraries(VTABundle PUBLIC
+        vta_runtime QuantizationBase Base LLVMSupport Support  pthread tinfo glog gflags)
