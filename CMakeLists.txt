@@ -53,4 +53,7 @@ endif()
 
 add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle.cpp)
 target_link_libraries(VTABundle PUBLIC
-        vta_runtime QuantizationBase Base LLVMSupport Support  pthread tinfo glog gflags)
+        vta_runtime QuantizationBase Base LLVMSupport Support  pthread glog gflags)
+if(NOT GLOW_WITH_VTASIM)
+    target_link_libraries(VTABundle PUBLIC cma)
+endif()

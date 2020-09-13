@@ -16,6 +16,7 @@
 #if(GLOW_WITH_VTASIM)
 #include "vta/vtalib/include/simulator/runtime.h"
 #else
+#include "vta/vtalib/include/zcu102/vta/runtime.h"
 #endif
 #include "vta/vtalib/include/Bundle/VTABundle.h"
 

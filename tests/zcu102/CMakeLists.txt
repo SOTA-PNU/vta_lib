@@ -4,7 +4,7 @@ foreach(object ${testfiles})
     message(STATUS "zcu102 test ${obj} is added")
     add_executable(${obj} ${object})
     target_link_libraries(${obj}
-            vta_runtime cma pthread tinfo glog gflags)
+            vta_runtime cma pthread glog gflags)
     set_target_properties(${obj} PROPERTIES RUNTIME_OUTPUT_DIRECTORY passed_tests )
 
     add_definitions(-DGLOW_WITH_ZCU102_TEST=1)
