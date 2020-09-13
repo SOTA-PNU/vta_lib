@@ -53,7 +53,30 @@ endif()
 
 add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle.cpp)
 target_link_libraries(VTABundle PUBLIC
-        vta_runtime QuantizationBase Base LLVMSupport Support  pthread glog gflags)
+        vta_runtime LLVMSupport pthread glog gflags)
+
+if(NOT HAVE_QUANTIZATIONBASE_LIB)
+    target_link_libraries(VTABundle PUBLIC
+        QuantizationBase)
+else()
+    target_link_libraries(VTABundle PUBLIC
+            ${HAVE_QUANTIZATIONBASE_LIB})
+    message(STATUS "Using Prebuilt QuantizationBase")
+endif()
+
+
+if(NOT HAVE_SUPPORT_LIB)
+    target_link_libraries(VTABundle PUBLIC
+            Support)
+else()
+    target_link_libraries(VTABundle PUBLIC
+            ${HAVE_SUPPORT_LIB})
+    message(STATUS "Using Prebuilt Support")
+endif()
+
+target_link_libraries(VTABundle PUBLIC
+        Base)
+
 if(NOT GLOW_WITH_VTASIM)
     target_link_libraries(VTABundle PUBLIC cma)
 endif()
