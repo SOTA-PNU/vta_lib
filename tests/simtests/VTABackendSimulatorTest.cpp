@@ -79,6 +79,11 @@ TEST(VTABackendSimulatorTest, VTA_CONV14_TEST) {
 TEST(VTABackendSimulatorTest, VTA_CONV15_TEST) {
   EXPECT_EQ(0,conv15_test());
 }
+
+TEST(VTABackendSimulatorTest, VTA_CONV16_TEST) {
+  EXPECT_EQ(0,conv16_test());
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
