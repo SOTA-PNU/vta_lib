@@ -9,6 +9,9 @@
 void xlnk_reset();
 
 int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
+                int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, int tile_h=14, int tile_w=14);
+
+int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
                 int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w);
 
 int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C,
@@ -57,4 +60,10 @@ int softmax(int8_t *input, int8_t *output, dim_t inDim0, dim_t inDim1,
             dim_t outDim0, dim_t outDim1);
 
 void debugprint(int8_t *input, unsigned_t size, std::string filename, bool isInt8 );
+
+void transpose_nhwc2vtaio(int8_t* input, int8_t* output, int N, int H, int W, int C);
+
+void transpose_nhwc2vtak(int8_t* input, int8_t* output, int KN, int KH, int KW, int C);
+
+void transpose_vtaio2nhwc(int8_t* input, int8_t* output, int N, int H, int W, int C);
 #endif //VTALIB_EXAMPLE_VTABUNDLE_H

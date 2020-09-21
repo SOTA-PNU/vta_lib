@@ -863,3 +863,80 @@ void debugprint(int8_t *input, unsigned_t size, std::string filename, bool isInt
   }
   fos.close();
 }
+
+
+void transpose_nhwc2vtaio(int8_t* input, int8_t* output, int N, int H, int W, int C){
+  int8_t *IN_NHWC = input;
+
+  int8_t *IN_NCHW = (int8_t *)malloc(N*C*H*W);
+  for (int n = 0; n < N; n++) {
+    for (int h = 0; h < H; h++) {
+      for (int w = 0; w < W; w++) {
+        for (int c = 0; c < C; c++) {
+          *(IN_NCHW + n*C*H*W + c*H*W + h*W + w)=*(IN_NHWC + n*H*W*C + h*W*C + w*C + c);
+        }
+      }
+    }
+  }
+
+  // reshape input NCHW -> N{C//16}16HW
+  int8_t *in_NC_16HW = IN_NCHW;
+
+
+  for (int n = 0; n < N; n++) {
+    for (int c_ = 0; c_ < C / 16; c_++) {
+      for (int h = 0; h < H; h++) {
+        for (int w = 0; w < W; w++) {
+          for (int c = 0; c < 16; c++) {
+            *(output + n*(C/16)*H*W*16 + c_*H*W*16 + h*W*16 + w*16 + c) =
+                *(in_NC_16HW + n*(C/16)*16*H*W + c_*16*H*W + c*H*W + h*W + w);
+          }
+        }
+      }
+    }
+  }
+
+  free(IN_NCHW);
+}
+
+void transpose_nhwc2vtak(int8_t* input, int8_t* output, int KN, int KH, int KW, int C){
+  // filter NHWC
+  int8_t *filter_NHWC = input;
+
+  int8_t* filter_N_16HWC_16 = filter_NHWC;
+  // transpose filter {N//16}16HW{C//16}16 =>  {N//16}{C//16}HW1616
+  for (int n_ = 0; n_ < KN / 16; n_++) {
+    for (int c_ = 0; c_ < C / 16; c_++) {
+      for (int h = 0; h < KH; h++) {
+        for (int w = 0; w < KW; w++) {
+          for (int n = 0; n < 16; n++) {
+            for (int c = 0; c < 16; c++) {
+              *(output + n_*(C/16)*KH*KW*16*16 + c_ *KH*KW*16*16 + h*KW*16*16 + w*16*16 + n*16 + c) =
+                  *(filter_N_16HWC_16 + n_*16*KH*KW*C + n*KH*KW*C + h*KW*C + w*C + c_*16 + c);
+            }
+          }
+        }
+      }
+    }
+  }
+
+
+}
+
+void transpose_vtaio2nhwc(int8_t* input, int8_t* output, int N, int H, int W, int C){
+  for (int b = 0; b < N; b++) {
+    for (int f = 0; f < C; f++) {
+      for (int i = 0; i < H; i++) {    //h
+        for (int j = 0; j < W; j++) {    //w
+
+          int out_ch = f / 16;
+          int oo = f % 16;
+          auto value =*(input + (out_ch * H * W * 16 + i * W * 16 + j * 16 + oo));
+          *(output + b * H * W * C + i * W * C + j * C + f) = value;
+
+
+        }
+      }
+    }
+  }
+}
