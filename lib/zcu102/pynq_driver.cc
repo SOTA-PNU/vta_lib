@@ -23,6 +23,7 @@
 #include <vta/driver.h>
 #include <thread>
 #include "pynq_driver.h"
+#include <sys/time.h>
 
 
 void* VTAMemAlloc(size_t size, int cached) {
@@ -60,7 +61,6 @@ void VTAInvalidateCache(void* vir_addr, vta_phy_addr_t phy_addr, int size) {
   // Call the cma_invalidate_cache on the CMA buffer
   // so that the host needs to read the buffer data.
   cma_invalidate_cache(vir_addr, phy_addr, size);
-
 }
 
 void *VTAMapRegister(uint32_t addr) {
@@ -70,14 +70,12 @@ void *VTAMapRegister(uint32_t addr) {
   uint32_t virt_offset = addr - virt_base;
   // Open file and mmap
   uint32_t mmap_file = open("/dev/mem", O_RDWR|O_SYNC);
-  auto mmap_result =  mmap(NULL,
-                           (VTA_IP_REG_MAP_RANGE + virt_offset),
-                           PROT_READ|PROT_WRITE,
-                           MAP_SHARED,
-                           mmap_file,
-                           virt_base);
-  close(mmap_file);
-  return mmap_result;
+  return mmap(NULL,
+              (VTA_IP_REG_MAP_RANGE + virt_offset),
+              PROT_READ|PROT_WRITE,
+              MAP_SHARED,
+              mmap_file,
+              virt_base);
 }
 
 void VTAUnmapRegister(void *vta) {
@@ -93,8 +91,29 @@ void VTAWriteMappedReg(void* base_addr, uint32_t offset, uint32_t val) {
 uint32_t VTAReadMappedReg(void* base_addr, uint32_t offset) {
   return *((volatile uint32_t *) (reinterpret_cast<char *>(base_addr) + offset));
 }
+
+
+struct ProfileEvent {
+  enum class EventType {
+    DEFAULT = 0,
+    VTA_SYNC = 1
+  };
+
+  uint64_t begin_timestamp_us;
+  uint64_t end_timestamp_us;
+  EventType event_type;
+  uint32_t event_num;
+  uint32_t ops;
+  uint32_t read_write_bits;
+  uint32_t gemm_count;
+  uint32_t alu_count;
+  uint32_t load_count;
+  double exe_time;
+};
+
+
 static int log_count = 0;
-#define AXI_PERF_MONITOR 0x80000000
+#define AXI_PERF_MONITOR 0xA0050000
 #define CONTROL_OFFSET 0x300
 #define SLOT0_OFFSET 0x100
 #define SLOT1_OFFSET 0x160
@@ -107,6 +126,13 @@ static int log_count = 0;
 #define READ_LATENCY_COUNT 0x50
 
 
+#define COMPUTE_LOAD_COUNT_OFFSET 0x50
+#define COMPUTE_GEMM_COUNT_OFFSET 0x60
+#define COMPUTE_ALU_COUNT_OFFSET 0x70
+
+#define PROFILE_ENABLE 1
+
+
 class VTADevice {
  public:
   VTADevice() {
@@ -116,6 +142,8 @@ class VTADevice {
     vta_compute_handle_ = VTAMapRegister(VTA_COMPUTE_ADDR);
     vta_store_handle_ = VTAMapRegister(VTA_STORE_ADDR);
     vta_axiperfmonitor_handle_ = VTAMapRegister(AXI_PERF_MONITOR);
+
+    current_event_index_ = 0;
   }
 
   ~VTADevice() {
@@ -124,6 +152,39 @@ class VTADevice {
     VTAUnmapRegister(vta_load_handle_);
     VTAUnmapRegister(vta_compute_handle_);
     VTAUnmapRegister(vta_store_handle_);
+
+    if (PROFILE_ENABLE) {
+      for (int i = 0; i < current_event_index_; i++) {
+        event_buffer_[current_event_index_].exe_time = (double)(event_buffer_[current_event_index_].end_timestamp_us - event_buffer_[current_event_index_].begin_timestamp_us) / 1000;
+        PrintProfilingInfo(&event_buffer_[i]);
+      }
+
+      double total_time = 0.0;
+      double total_vta_time = 0.0;
+      for (int i = 0; i < current_event_index_; i++)
+        total_vta_time += event_buffer_[i].exe_time;
+
+      total_time = double(event_buffer_[current_event_index_ - 1].end_timestamp_us - event_buffer_[0].begin_timestamp_us) / 1000.0;
+
+      printf("total_time : %.3f ms, total_vta_time : %.3f ms\n", total_time, total_vta_time);
+
+
+    }
+  }
+
+  void PrintProfilingInfo(ProfileEvent* e) {
+    printf("event_type %s, event_num %d, GOPS %.3f, Gbits %.3f, gemm_count %d, alu_count %d, load_count %d, exe_time %.3f, begin_timestamp_us %lld, end_timestamp_us %lld\n",
+      e->event_type == ProfileEvent::EventType::VTA_SYNC ? "VTA_SYNC" : "Unknown",
+      e->event_num,
+      (double)e->ops / e->exe_time / 1000000,
+      (double)e->read_write_bits / e->exe_time / 1000000,
+      e->gemm_count,
+      e->alu_count,
+      e->load_count,
+      e->exe_time,
+      e->begin_timestamp_us,
+      e->end_timestamp_us
+    );
   }
 
   int Run(vta_phy_addr_t insn_phy_addr,
@@ -137,23 +198,77 @@ class VTADevice {
     VTAWriteMappedReg(vta_compute_handle_, VTA_COMPUTE_BIAS_ADDR_OFFSET, 0);
     VTAWriteMappedReg(vta_store_handle_, VTA_STORE_OUT_ADDR_OFFSET, 0);
 
+    VTAWriteMappedReg(vta_axiperfmonitor_handle_, CONTROL_OFFSET, 2);
+    VTAWriteMappedReg(vta_axiperfmonitor_handle_, CONTROL_OFFSET, 1);
+
     // VTA start
     VTAWriteMappedReg(vta_fetch_handle_, 0x0, VTA_START);
     VTAWriteMappedReg(vta_load_handle_, 0x0, VTA_AUTORESTART);
     VTAWriteMappedReg(vta_compute_handle_, 0x0, VTA_AUTORESTART);
     VTAWriteMappedReg(vta_store_handle_, 0x0, VTA_AUTORESTART);
 
+    struct timeval start_time, stop_time;
 
-    // AXI Perf Count Init
-//    VTAWriteMappedReg(vta_axiperfmonitor_handle_, CONTROL_OFFSET, 2);
-//    VTAWriteMappedReg(vta_axiperfmonitor_handle_, CONTROL_OFFSET, 1);
-
+    gettimeofday(&start_time, nullptr);
     // Loop until the VTA is done
     unsigned t, flag = 0;
     for (t = 0; t < wait_cycles; ++t) {
       flag = VTAReadMappedReg(vta_compute_handle_, VTA_COMPUTE_DONE_RD_OFFSET);
       if (t > 10 && flag == VTA_DONE) break;
       std::this_thread::yield();
+    }
+    gettimeofday(&stop_time, nullptr);
+
+
+
+    if (PROFILE_ENABLE) {
+      unsigned slot0_wr_bytes = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT0_OFFSET + WRITE_BYTE_COUNT);
+      unsigned slot0_wr_transactions = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT0_OFFSET + WRITE_TRANSACTION_COUNT);
+      unsigned slot0_wr_latency = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT0_OFFSET + WRITE_LATENCY_COUNT);
+
+      unsigned slot0_rd_bytes = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT0_OFFSET + READ_BYTE_COUNT);
+      unsigned slot0_rd_transactions = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT0_OFFSET + READ_TRANSACTION_COUNT);
+      unsigned slot0_rd_latency = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT0_OFFSET + READ_LATENCY_COUNT);
+
+      unsigned slot1_wr_bytes = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT1_OFFSET + WRITE_BYTE_COUNT);
+      unsigned slot1_wr_transactions = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT1_OFFSET + WRITE_TRANSACTION_COUNT);
+      unsigned slot1_wr_latency = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT1_OFFSET + WRITE_LATENCY_COUNT);
+
+      unsigned slot1_rd_bytes = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT1_OFFSET + READ_BYTE_COUNT);
+      unsigned slot1_rd_transactions = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT1_OFFSET + READ_TRANSACTION_COUNT);
+      unsigned slot1_rd_latency = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT1_OFFSET + READ_LATENCY_COUNT);
+
+      unsigned slot2_wr_bytes = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT2_OFFSET + WRITE_BYTE_COUNT);
+      unsigned slot2_wr_transactions = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT2_OFFSET + WRITE_TRANSACTION_COUNT);
+      unsigned slot2_wr_latency = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT2_OFFSET + WRITE_LATENCY_COUNT);
+
+      unsigned slot2_rd_bytes = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT2_OFFSET + READ_BYTE_COUNT);
+      unsigned slot2_rd_transactions = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT2_OFFSET + READ_TRANSACTION_COUNT);
+      unsigned slot2_rd_latency = VTAReadMappedReg(vta_axiperfmonitor_handle_, SLOT2_OFFSET + READ_LATENCY_COUNT);
+
+      unsigned load_count = VTAReadMappedReg(vta_compute_handle_, COMPUTE_LOAD_COUNT_OFFSET);
+      unsigned gemm_count = VTAReadMappedReg(vta_compute_handle_, COMPUTE_GEMM_COUNT_OFFSET);
+      unsigned alu_count = VTAReadMappedReg(vta_compute_handle_, COMPUTE_ALU_COUNT_OFFSET);
+
+      unsigned ops = (gemm_count * 2 * 256) + (alu_count / 2 * 16);
+      unsigned read_write_bits = (slot0_wr_bytes + slot0_rd_bytes) * 8;
+
+
+      uint64_t begin_timestamp_us = static_cast<uint64_t>(start_time.tv_sec) * 1000000 + start_time.tv_usec;
+      uint64_t end_timestamp_us= static_cast<uint64_t>(stop_time.tv_sec) * 1000000 + stop_time.tv_usec;
+
+      event_buffer_[current_event_index_].begin_timestamp_us = begin_timestamp_us;
+      event_buffer_[current_event_index_].end_timestamp_us = end_timestamp_us;
+      event_buffer_[current_event_index_].exe_time = double(end_timestamp_us - begin_timestamp_us) / 1000.0;
+      event_buffer_[current_event_index_].ops = ops;
+      event_buffer_[current_event_index_].read_write_bits = read_write_bits;
+      event_buffer_[current_event_index_].event_type = ProfileEvent::EventType::VTA_SYNC;
+      event_buffer_[current_event_index_].event_num = current_event_index_;
+      event_buffer_[current_event_index_].gemm_count = gemm_count;
+      event_buffer_[current_event_index_].load_count = load_count;
+      event_buffer_[current_event_index_].alu_count = alu_count;
+
+      current_event_index_++;
     }
 
     // Report error if timeout
@@ -168,6 +283,8 @@ class VTADevice {
   void* vta_store_handle_{nullptr};
   void* vta_axiperfmonitor_handle_{nullptr};
 
+  struct ProfileEvent event_buffer_[1024];
+  uint32_t current_event_index_;
 };
 
 VTADeviceHandle VTADeviceAlloc() {
@@ -185,3 +302,4 @@ int VTADeviceRun(VTADeviceHandle handle,
   return static_cast<VTADevice*>(handle)->Run(
       insn_phy_addr, insn_count, wait_cycles);
 }
+
