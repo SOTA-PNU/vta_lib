@@ -12,7 +12,7 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
                 int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, int tile_h=14, int tile_w=14);
 
 int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
-                int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w);
+                       int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, void* vtaCmdH, int nVirtualThread = 1, int tileHSize = 14, int tileWSize = 14);
 
 int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C,
         dim_t KN, dim_t KH, dim_t KW, int pad_size, int stride_size, size_t group, size_t dilation,

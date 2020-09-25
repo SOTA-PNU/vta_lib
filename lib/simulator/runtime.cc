@@ -239,6 +239,7 @@ class UopKernel {
     op.src_idx = src_index;
     op.wgt_idx = wgt_index;
     seq_.push_back(op);
+    assert(seq_.size()<=8192);
     // Ensure that mode is consistent if set
     if (mode_ == 0xFFFFFFFF) {
       mode_ = mode;
@@ -1365,6 +1366,12 @@ void VTABufferCopy(const void* from,
   }
 }
 
+void* VTABufferGetVirtAddr(const void* buffer) {
+  vta::DataBuffer* from_buffer = nullptr;
+
+  from_buffer = vta::DataBuffer::FromHandle(buffer);
+  return from_buffer->virt_addr();
+}
 VTACommandHandle VTATLSCommandHandle() {
   return vta::CommandQueue::ThreadLocal().get();
 }

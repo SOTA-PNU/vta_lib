@@ -15,7 +15,7 @@
 
 using namespace std;
 
-namespace sim_test_conv16 {
+namespace sim_test_conv17 {
 
 
 int getTileH(int H, int outH){
@@ -394,8 +394,8 @@ void conv_kernel(uint32_t sizeOutTileH,
 
 
 
-using namespace sim_test_conv16;
-int conv16_test() {
+using namespace sim_test_conv17;
+int conv17_test() {
   int is_diff = 0;
   srand(time(NULL));
 

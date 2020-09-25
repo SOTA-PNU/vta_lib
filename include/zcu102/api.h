@@ -19,6 +19,7 @@ void VTABufferCopy(const void* from,
                    size_t size,
                    int kind_mask);
 
+void* VTABufferGetVirtAddr(const void* buffer);
 VTACommandHandle VTATLSCommandHandle() ;
 
 void VTARuntimeShutdown();

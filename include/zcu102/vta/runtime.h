@@ -71,6 +71,7 @@ TVM_DLL void VTABufferCopy(const void* from,
                            size_t to_offset,
                            size_t size,
                            int kind_mask);
+TVM_DLL void* VTABufferGetVirtAddr(const void* buffer);
 
 /*! \brief VTA command handle */
 typedef void* VTACommandHandle;

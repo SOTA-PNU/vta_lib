@@ -56,6 +56,13 @@ void VTABufferCopy(const void* from,
   }
 }
 
+void* VTABufferGetVirtAddr(const void* buffer) {
+  vta::DataBuffer* from_buffer = nullptr;
+
+  from_buffer = vta::DataBuffer::FromHandle(buffer);
+  return from_buffer->virt_addr();
+}
+
 VTACommandHandle VTATLSCommandHandle() {
   return vta::CommandQueue::ThreadLocal().get();
 }

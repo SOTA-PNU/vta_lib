@@ -45,9 +45,17 @@ void xlnk_reset() {
 #endif
 }
 
+
+
+
 struct ResetAcc {
   uint32_t base_;
   uint32_t size_;
+  bool operator==(ResetAcc &op) {
+    if (base_ == op.base_ && size_ == op.size_)
+      return true;
+    return false;
+  }
 };
 
 int reset_acc(void *param) {
@@ -69,23 +77,28 @@ struct gemmop_mxn {
   uint32_t stride_h_;
   uint32_t stride_w_;
   uint32_t n_kernel_;
-};
-int gemmop_mxn(void *param) {
-
-  struct gemmop_mxn *ctx = (struct gemmop_mxn *) (param);
-  VTAUopLoopBegin(ctx->tile_size_h_, ctx->tile_size_w_, ctx->src_factor_ * ctx->stride_h_, 0);
-  VTAUopLoopBegin(ctx->kernel_h_, 0, ctx->src_factor_, ctx->kernel_w_);
-
-  for (int dx = 0; dx < ctx->kernel_w_; dx++) {
-    for (int j = 0; j < ctx->tile_size_w_; j++) {
-      VTAUopPush(0, 0, j, j*ctx->stride_w_ + dx, dx, 0, 0, 0);
-    }
+  uint32_t input_base_addr_;
+  uint32_t weight_base_addr_;
+  uint32_t output_base_addr_;
+  bool operator==(gemmop_mxn &op){
+    if(tile_size_h_==op.tile_size_h_ &&
+       tile_size_w_ == op.tile_size_w_ &&
+       in_tile_size_h_ == op.in_tile_size_h_ &&
+       in_tile_size_w_ == op.in_tile_size_w_ &&
+       src_factor_ == op.src_factor_ &&
+       kernel_h_ == op.kernel_h_ &&
+       kernel_w_ == op.kernel_w_ &&
+       stride_h_ == op.stride_h_ &&
+       stride_w_ == op.stride_w_ &&
+       n_kernel_ == op.n_kernel_ &&
+       input_base_addr_ == op.input_base_addr_ &&
+       weight_base_addr_ == op.weight_base_addr_ &&
+       output_base_addr_ == op.output_base_addr_)
+      return true;
+    return false;
   }
-  VTAUopLoopEnd();
-  VTAUopLoopEnd();
 
-  return 0;
-}
+};
 
 int gemmop_mxn2(void *param) {
 
@@ -109,26 +122,63 @@ int gemmop_mxn2(void *param) {
   return 0;
 }
 
+int gemmop_mxn(void *param) {
+
+  struct gemmop_mxn *ctx = (struct gemmop_mxn *) (param);
+  VTAUopLoopBegin(ctx->tile_size_w_, 1, ctx->stride_w_, 0);
+  VTAUopLoopBegin(ctx->kernel_w_, 0, 1, 1);
+
+  for (int dx = 0; dx < ctx->kernel_h_; dx++) {
+    for (int kernelIdx = 0; kernelIdx < ctx->n_kernel_; kernelIdx++) {
+      for (int inTileHIdx = 0; inTileHIdx < ctx->tile_size_h_; inTileHIdx++) {
+        auto outTileHIdx = inTileHIdx + (kernelIdx * ctx->tile_size_h_);
+        VTAUopPush(0, 0, ctx->output_base_addr_ + outTileHIdx * ctx->tile_size_w_,
+                   ctx->input_base_addr_ + (inTileHIdx * ctx->stride_h_ + dx) * (ctx->in_tile_size_w_),
+                   ctx->weight_base_addr_ + dx * ctx->kernel_w_ + kernelIdx * (ctx->kernel_w_ * ctx->kernel_h_), 0, 0,
+                   0);
+      }
+    }
+  }
+
+  VTAUopLoopEnd();
+  VTAUopLoopEnd();
+
+  return 0;
+}
 // alu func
 struct ShiftContext {
   uint32_t base_;
   uint32_t size_;
   uint8_t shift_;
+  bool operator==(ShiftContext &op){
+    if(base_==op.base_ &&
+       size_ == op.size_ &&
+       shift_ == op.shift_)
+      return true;
+    return false;
+  }
 };
 int alu_shr(void *param) {
   ShiftContext *p = (ShiftContext *) (param);
   VTAUopLoopBegin(p->size_, 1, 1, 0);
-  VTAUopPush(1, 0, p->base_, 0, 0, 3, 1, p->shift_);
+  VTAUopPush(1, 0, p->base_, p->base_, 0, 3, 1, p->shift_);
   VTAUopLoopEnd();
   return 0;
 }
-
 
 struct AddContext {
   uint32_t dst_;
   uint32_t src_;
   uint32_t size_;
   uint32_t iter_;
+  bool operator==(AddContext &op){
+    if(dst_==op.dst_ &&
+       src_ == op.src_ &&
+       size_ == op.size_ &&
+       iter_ == op.iter_)
+      return true;
+    return false;
+  }
 };
 
 int alu_add(void *param) {
@@ -145,7 +195,7 @@ int alu_add(void *param) {
 int alu_max(void *param) {
   ResetAcc *p = (ResetAcc *) (param);
   VTAUopLoopBegin(p->size_, 1, 1, 0);
-  VTAUopPush(1, 0, p->base_, 0, 0, 1, 1, -128);
+  VTAUopPush(1, 0, p->base_, p->base_, 0, 1, 1, -128);
   VTAUopLoopEnd();
   return 0;
 }
@@ -153,7 +203,7 @@ int alu_max(void *param) {
 int alu_relu(void *param) {
   ResetAcc *p = (ResetAcc *) (param);
   VTAUopLoopBegin(p->size_, 1, 1, 0);
-  VTAUopPush(1, 0, p->base_, 0, 0, 1, 1, 0);
+  VTAUopPush(1, 0, p->base_, p->base_, 0, 1, 1, 0);
   VTAUopLoopEnd();
   return 0;
 }
@@ -161,12 +211,57 @@ int alu_relu(void *param) {
 int alu_min(void *param) {
   ResetAcc *p = (ResetAcc *) (param);
   VTAUopLoopBegin(p->size_, 1, 1, 0);
-  VTAUopPush(1, 0, p->base_, 0, 0, 0, 1, 127);
+  VTAUopPush(1, 0, p->base_, p->base_, 0, 0, 1, 127);
   VTAUopLoopEnd();
   return 0;
 }
 
-void conv_kernel(uint32_t sizeOutTileH,
+
+struct GemmUOpHandle{
+  struct gemmop_mxn strGemm;
+  void *uopHandle_gemm[2];
+  GemmUOpHandle(){
+    uopHandle_gemm[0] = nullptr;
+  }
+};
+
+std::vector<GemmUOpHandle*> vGemmUOpHandle;
+
+
+
+struct AddUopHandle{
+  struct AddContext strAdd;
+  void *uopHandle_add[2];
+  AddUopHandle(){
+    uopHandle_add[0] = nullptr;
+  }
+};
+
+std::vector<AddUopHandle*> vAddUOpHandle;
+
+struct ResetUopHandle{
+  struct ResetAcc strReset;
+  void *uopHandle_reset[2];
+  ResetUopHandle(){
+    uopHandle_reset[0] = nullptr;
+  }
+};
+
+std::vector<ResetUopHandle*> vResetUopHandle;
+
+std::vector<ResetUopHandle*> vAluUopHandle;
+
+struct ShiftUopHandle{
+  struct ShiftContext strShift;
+  void *uopHandle_shift[2];
+  ShiftUopHandle(){
+    uopHandle_shift[0] = nullptr;
+  }
+};
+
+std::vector<ShiftUopHandle*> vShiftUopHandle;
+
+void conv_kernel2(uint32_t sizeOutTileH,
                  uint32_t sizeOutTileW,
                  uint32_t pad_size,
                  uint32_t stride_size,
@@ -387,6 +482,333 @@ void conv_kernel(uint32_t sizeOutTileH,
 
 
 
+void conv_kernel(uint32_t sizeOutTileH,
+                 uint32_t sizeOutTileW,
+                 uint32_t pad_size,
+                 uint32_t stride_size,
+                 uint32_t x_pad_before,
+                 uint32_t x_pad_after,
+                 uint32_t y_pad_before,
+                 uint32_t y_pad_after,
+                 uint32_t outputWOffset,
+                 uint32_t outputHOffset,
+                 uint32_t sizeInTileH,
+                 uint32_t sizeInTileW,
+                 uint32_t numInputChannel,
+                 uint32_t inputHStride,
+                 uint32_t inputWStride,
+                 void *vta_input_buf,
+                 uint32_t KN,
+                 uint32_t KH,
+                 uint32_t KW,
+                 void *vta_filter_buf,
+                 uint32_t out_h,
+                 uint32_t out_w,
+                 void *vta_output_buf,
+                 bool relu,
+                 uint8_t shift,
+                 bool bias,
+                 void *vta_bias_buf,
+                 VTACommandHandle& vtaCmdH
+
+) {
+
+  uint32_t resizedOutTileH = (sizeInTileH-KH) / stride_size + 1;
+  uint32_t resizedOutTileW = (sizeInTileW-KW) / stride_size + 1;
+  uint32_t resizedInTileH =  (resizedOutTileH - 1) * stride_size + KH;
+  uint32_t resizedInTileW =  (resizedOutTileW - 1) * stride_size + KW;
+
+  uint32_t ACC_MEM_ENTRY = 2048;
+  uint32_t INP_MEM_ENTRY = 2048;
+  uint32_t WGT_MEM_ENTRY = 1024;
+
+
+  uint32_t nVirtualThread = 1;
+  uint32_t nFilterinLoop = KN / nVirtualThread / 16 ;
+  nFilterinLoop = min(nFilterinLoop, ACC_MEM_ENTRY/ nVirtualThread / resizedOutTileH / resizedOutTileW);
+  for(uint32_t i = 31; i>=0; i--){
+    if(nFilterinLoop & 0x1 <<i) {
+      nFilterinLoop = 0x1 <<i;
+      break;
+    }
+  }
+
+  for (uint32_t filterIdx = 0; filterIdx < KN / nFilterinLoop / nVirtualThread / 16; filterIdx++) {
+    // for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
+
+    uint32_t outDummyH = 0;
+    uint32_t inDummyH = 0;
+    uint32_t outDummyW = 0;
+    uint32_t inDummyW = 0;
+
+    if (resizedOutTileH < MIN_H_SIZE) {
+      outDummyH = MIN_H_SIZE - resizedOutTileH;
+      resizedOutTileH = MIN_H_SIZE;
+      resizedInTileH = (resizedOutTileH - 1) * stride_size + KH;
+      inDummyH = resizedInTileH - sizeInTileH;
+    }
+
+    if (resizedOutTileW < MIN_W_SIZE) {
+      outDummyW = MIN_W_SIZE - resizedOutTileW;
+      resizedOutTileW = MIN_W_SIZE;
+      resizedInTileW = (resizedOutTileW - 1) * stride_size + KW;
+      inDummyW = resizedInTileW - sizeInTileW;
+    }
+
+    for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
+      // acc buffer reset
+
+      uint32_t outputSramBaseAddr = threadIdx * ACC_MEM_ENTRY / nVirtualThread;
+      uint32_t inputSramBaseAddr = threadIdx * (INP_MEM_ENTRY / nVirtualThread);
+      uint32_t weightSramBaseAddr =
+          threadIdx * (WGT_MEM_ENTRY / nVirtualThread);
+      ResetAcc reset;
+      reset.base_ = outputSramBaseAddr;
+      reset.size_ = resizedOutTileH * resizedOutTileW * nFilterinLoop;
+
+      void **uopHandle_reset;
+
+      bool isFound = false;
+      for(auto resetUOpHandle : vResetUopHandle){
+        if(resetUOpHandle->strReset==reset){
+          uopHandle_reset = resetUOpHandle->uopHandle_reset;
+          isFound = true;
+          break;
+        }
+      }
+      if(!isFound){
+        auto newHandle = new ResetUopHandle();
+        newHandle->strReset = reset;
+        uopHandle_reset = newHandle->uopHandle_reset;
+        vResetUopHandle.push_back(newHandle);
+      }
+
+      VTAPushGEMMOp(uopHandle_reset, &reset_acc, &reset, 0);
+      VTADepPush(vtaCmdH, 2, 1);
+    }
+
+    uint32_t inputWOffset = (int)(outputWOffset * stride_size - pad_size) < 0
+                            ? 0
+                            : outputWOffset * stride_size - pad_size;
+    uint32_t inputHOffset = (int)(outputHOffset * stride_size - pad_size) < 0
+                            ? 0
+                            : outputHOffset * stride_size - pad_size;
+
+    for (uint32_t channelIdx = 0; channelIdx < numInputChannel / 16;
+         channelIdx++) {
+      uint32_t src_offset = channelIdx * inputHStride * inputWStride +
+                            inputHOffset * inputWStride + inputWOffset;
+      uint32_t filter_offset =
+          filterIdx * nFilterinLoop * (numInputChannel / 16) * KH * KW +
+          channelIdx * KH * KW;
+      uint32_t y_size =
+          (inputHStride - inputHOffset + y_pad_before) < resizedInTileH
+          ? inputHStride - inputHOffset
+          : resizedInTileH - y_pad_before;
+      uint32_t x_size =
+          (inputWStride - inputWOffset + x_pad_before) < resizedInTileW
+          ? inputWStride - inputWOffset
+          : resizedInTileW - x_pad_before;
+
+      for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
+        uint32_t inputSramBaseAddr =
+            threadIdx * (INP_MEM_ENTRY / nVirtualThread);
+        uint32_t weightSramBaseAddr =
+            threadIdx * (WGT_MEM_ENTRY / nVirtualThread);
+        VTADepPop(vtaCmdH, 2, 1);
+        VTALoadBuffer2D(vtaCmdH, vta_input_buf, src_offset, x_size, y_size,
+                        inputWStride, x_pad_before, y_pad_before,
+                        resizedInTileW - x_pad_before - x_size,
+                        resizedInTileH - y_pad_before - y_size,
+                        inputSramBaseAddr, // index
+                        2);                // type
+
+        VTALoadBuffer2D(vtaCmdH, vta_filter_buf, filter_offset, KH * KW,
+                        nFilterinLoop, KH * KW * numInputChannel / 16, 0, 0, 0,
+                        0, weightSramBaseAddr, 1);
+
+        VTADepPush(vtaCmdH, 1, 2);
+      }
+      for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
+        uint32_t outputSramBaseAddr =
+            threadIdx * ACC_MEM_ENTRY / nVirtualThread;
+        uint32_t inputSramBaseAddr =
+            threadIdx * (INP_MEM_ENTRY / nVirtualThread);
+        uint32_t weightSramBaseAddr =
+            threadIdx * (WGT_MEM_ENTRY / nVirtualThread);
+        VTADepPop(vtaCmdH, 1, 2);
+        struct gemmop_mxn gemm_ctx;
+        gemm_ctx.tile_size_h_ = resizedOutTileH;
+        gemm_ctx.tile_size_w_ = resizedOutTileW;
+        gemm_ctx.src_factor_ = resizedInTileW;
+        gemm_ctx.in_tile_size_h_ = resizedInTileH;
+        gemm_ctx.in_tile_size_w_ = resizedInTileW;
+        gemm_ctx.kernel_h_ = KH;
+        gemm_ctx.kernel_w_ = KW;
+        gemm_ctx.stride_h_ = stride_size;
+        gemm_ctx.stride_w_ = stride_size;
+        gemm_ctx.n_kernel_ = nFilterinLoop;
+        gemm_ctx.input_base_addr_ = inputSramBaseAddr;
+        gemm_ctx.output_base_addr_ = outputSramBaseAddr;
+        gemm_ctx.weight_base_addr_ = weightSramBaseAddr;
+
+        void **uopHandle_gemm;
+
+        bool isFound = false;
+        for(auto gemmUOpHandle : vGemmUOpHandle){
+          if(gemmUOpHandle->strGemm==gemm_ctx){
+            uopHandle_gemm = gemmUOpHandle->uopHandle_gemm;
+            isFound = true;
+            break;
+          }
+        }
+        if(!isFound){
+          auto newHandle = new GemmUOpHandle();
+          newHandle->strGemm = gemm_ctx;
+          uopHandle_gemm = newHandle->uopHandle_gemm;
+          vGemmUOpHandle.push_back(newHandle);
+        }
+
+
+        VTAPushGEMMOp(uopHandle_gemm, &gemmop_mxn, &gemm_ctx, 0);
+        VTADepPush(vtaCmdH, 2, 1);
+      }
+    }
+    for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
+      VTADepPop(vtaCmdH, 2, 1);
+    }
+    for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
+
+      uint32_t outputSramBaseAddr = threadIdx * ACC_MEM_ENTRY / nVirtualThread;
+      uint32_t inputSramBaseAddr = threadIdx * (INP_MEM_ENTRY / nVirtualThread);
+      uint32_t weightSramBaseAddr =
+          threadIdx * (WGT_MEM_ENTRY / nVirtualThread);
+      if (bias) {
+        uint32_t sram_offset = outputSramBaseAddr + resizedOutTileH *
+                                                    resizedOutTileW *
+                                                    nFilterinLoop;
+        VTALoadBuffer2D(vtaCmdH, (int32_t *)vta_bias_buf,
+                        filterIdx * (nVirtualThread + 0) * nFilterinLoop,
+                        16 * nFilterinLoop, 1, 16 * nFilterinLoop, 0, 0, 0, 0,
+                        sram_offset, // index
+                        3);          // type
+
+        AddContext add_ctx;
+        add_ctx.dst_ = outputSramBaseAddr;
+        add_ctx.size_ = resizedOutTileH * resizedOutTileW;
+        add_ctx.src_ = sram_offset;
+        add_ctx.iter_ = nFilterinLoop;
+
+
+        void **uopHandle_add;
+
+        bool isFound = false;
+        for(auto addUOpHandle : vAddUOpHandle){
+          if(addUOpHandle->strAdd==add_ctx){
+            uopHandle_add = addUOpHandle->uopHandle_add;
+            isFound = true;
+            break;
+          }
+        }
+        if(!isFound){
+          auto newHandle = new AddUopHandle();
+          newHandle->strAdd = add_ctx;
+          uopHandle_add = newHandle->uopHandle_add;
+          vAddUOpHandle.push_back(newHandle);
+        }
+
+        VTAPushALUOp(uopHandle_add, &alu_add, &add_ctx, 0);
+      }
+
+      ShiftContext shift_ctx;
+      shift_ctx.base_ = outputSramBaseAddr;
+      shift_ctx.size_ = resizedOutTileH * resizedOutTileW * nFilterinLoop;
+      shift_ctx.shift_ = shift;
+
+      void **uopHandle_shift;
+
+      bool isFound = false;
+      for(auto shiftUOpHandle : vShiftUopHandle){
+        if(shiftUOpHandle->strShift==shift_ctx){
+          uopHandle_shift = shiftUOpHandle->uopHandle_shift;
+          isFound = true;
+          break;
+        }
+      }
+      if(!isFound){
+        auto newHandle = new ShiftUopHandle();
+        newHandle->strShift = shift_ctx;
+        uopHandle_shift = newHandle->uopHandle_shift;
+        vShiftUopHandle.push_back(newHandle);
+      }
+
+      VTAPushALUOp(uopHandle_shift, &alu_shr, &shift_ctx, 0);
+
+      ResetAcc alu_ctx;
+      alu_ctx.base_ = outputSramBaseAddr;
+      alu_ctx.size_ = resizedOutTileH * resizedOutTileW * nFilterinLoop;
+      void **uopHandle_reset;
+
+      isFound = false;
+      for(auto resetUOpHandle : vAluUopHandle){
+        if(resetUOpHandle->strReset==alu_ctx){
+          uopHandle_reset = resetUOpHandle->uopHandle_reset;
+          isFound = true;
+          break;
+        }
+      }
+      if(!isFound){
+        auto newHandle = new ResetUopHandle();
+        newHandle->strReset = alu_ctx;
+        uopHandle_reset = newHandle->uopHandle_reset;
+        vAluUopHandle.push_back(newHandle);
+      }
+
+      if (!relu) {
+        VTAPushALUOp(uopHandle_reset, &alu_max, &alu_ctx, 0);
+      } else {
+        VTAPushALUOp(uopHandle_reset, &alu_relu, &alu_ctx, 0);
+      }
+
+      VTAPushALUOp(uopHandle_reset, &alu_min, &alu_ctx, 0);
+
+      VTADepPush(vtaCmdH, 2, 3);
+    }
+
+    for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
+      uint32_t outputSramBaseAddr = threadIdx * ACC_MEM_ENTRY / nVirtualThread;
+      VTADepPop(vtaCmdH, 2, 3);
+
+      if (outDummyW == 0) {
+        for (uint32_t fIdx = 0; fIdx < nFilterinLoop; fIdx++) {
+
+          VTAStoreBuffer2D(
+              vtaCmdH,
+              outputSramBaseAddr + fIdx * resizedOutTileH * resizedOutTileW, 4,
+              vta_output_buf,
+              (filterIdx * nVirtualThread + threadIdx) * nFilterinLoop * out_w *
+              out_h +
+              outputHOffset * out_w + outputWOffset + fIdx * out_w * out_h,
+              sizeOutTileW, sizeOutTileH, out_w);
+        }
+      } else {
+        for (int hIdx = 0; hIdx < sizeOutTileH * nFilterinLoop; hIdx++) {
+          VTAStoreBuffer2D(vtaCmdH, outputSramBaseAddr + hIdx * resizedOutTileW,
+                           4, vta_output_buf,
+                           (filterIdx * nVirtualThread + threadIdx) *
+                           nFilterinLoop * out_w * out_h +
+                           (outputHOffset + hIdx) * out_w + outputWOffset,
+                           sizeOutTileW, 1, out_w);
+        }
+      }
+      VTADepPush(vtaCmdH, 3, 2);
+      VTADepPop(vtaCmdH, 3, 2);
+    }
+  }
+}
+
+
+
 int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
                 int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, int tile_h, int tile_w) {
   int8_t *IN_NHWC = input;
@@ -510,7 +932,7 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
       }
 
       if ((tileW != nTileW - 1)) {
-        conv_kernel(resizedOutTileH,
+        conv_kernel2(resizedOutTileH,
                     sizeOutTileW,
                     pad_size,
                     stride_size,
@@ -543,7 +965,7 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
         uint32_t sizeOutTileBoundaryW = out_w - tileW * sizeOutTileW;
         uint32_t sizeInTileBoundaryW = (sizeOutTileBoundaryW - 1) * stride_size + KW ;
 
-        conv_kernel(resizedOutTileH,
+        conv_kernel2(resizedOutTileH,
                     sizeOutTileBoundaryW,
                     pad_size,
                     stride_size,
@@ -622,33 +1044,22 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
   return 0;
 }
 
-
 int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
-                int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w) {
+                       int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, void* vtaCmdH, int nVirtualThread, int tileHSize, int tileWSize) {
+
   int8_t *in_NC_HW16 = input;
   int8_t* filter_N_C_HW1616 = kernel;
+  clock_t conv_stage0_start = clock();
 
-  // VTA DRAM alloc
-  // vta's input buffer, as the same size of in_NC_HW16[N][C/16][H][W][16];
-  void *vta_input_buf = VTABufferAlloc(N * C * H * W);
-  // vta's filter buffer, as the same size of filter_N_C_HW1616[KN/16][C/16][KH][KW][16][16];
-  void *vta_filter_buf = VTABufferAlloc(KN * KH * KW * C);
-  void *vta_output_buf = VTABufferAlloc(out_h * out_w * KN);
-  void *vta_bias_buf;
-  if(doBias) {
-    vta_bias_buf = VTABufferAlloc(KN * 4);
-  }
-  // VTA Buffer copy
-  VTABufferCopy(in_NC_HW16, 0, vta_input_buf, 0, N * C * H * W, 1);
-  VTABufferCopy(filter_N_C_HW1616, 0, vta_filter_buf, 0, KN * KH * KW * C, 1);
+  void *vta_input_buf = input;
+  void *vta_filter_buf = kernel;
+  void *vta_output_buf = output;
+  void *vta_bias_buf = bias;
 
-  if(doBias) {
-    VTABufferCopy(bias, 0, vta_bias_buf, 0, KN * 4, 1);
-  }
-
+  clock_t conv_stage0_end = clock();
   uint32_t nTileW, nTileH;
-  uint32_t sizeOutTileW = OUT_TILE_SIZE_W;
-  uint32_t sizeOutTileH = OUT_TILE_SIZE_H;
+  uint32_t sizeOutTileW = tileWSize;
+  uint32_t sizeOutTileH = tileHSize;
 
   uint32_t sizeInTileW = (sizeOutTileW - 1) * stride_size + KW;
   uint32_t sizeInTileH = (sizeOutTileH - 1) * stride_size + KH;
@@ -659,28 +1070,27 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
   nTileH = out_h / sizeOutTileH + isRemainTileH;
 
 
-  VTACommandHandle vtaCmdH{nullptr};
-  vtaCmdH = VTATLSCommandHandle();
+
   //VTASetDebugMode(vtaCmdH, VTA_DEBUG_DUMP_INSN | VTA_DEBUG_DUMP_UOP);
   VTASetDebugMode(vtaCmdH, 0);
-
-  for (int tileH = 0; tileH < nTileH; tileH++) {
-    for (int tileW = 0; tileW < nTileW; tileW++) {
-      uint32_t x_pad_before = tileW == 0 ? pad_size : 0;
-      uint32_t x_pad_after = tileW == (nTileW - 1) ? pad_size : 0;
-      uint32_t y_pad_before = tileH == 0 ? pad_size : 0;
-      uint32_t y_pad_after = tileH == (nTileH - 1) ? pad_size : 0;
-      uint32_t outputWOffset = tileW * sizeOutTileW;
-      uint32_t outputHOffset = tileH * sizeOutTileH;
+  clock_t conv_stage1_end = clock();
+  for (int tileHIdx = 0; tileHIdx < nTileH; tileHIdx++) {
+    for (int tileWIdx = 0; tileWIdx < nTileW; tileWIdx++) {
+      uint32_t x_pad_before = tileWIdx == 0 ? pad_size : 0;
+      uint32_t x_pad_after = tileWIdx == (nTileW - 1) ? pad_size : 0;
+      uint32_t y_pad_before = tileHIdx == 0 ? pad_size : 0;
+      uint32_t y_pad_after = tileHIdx == (nTileH - 1) ? pad_size : 0;
+      uint32_t outputWOffset = tileWIdx * sizeOutTileW;
+      uint32_t outputHOffset = tileHIdx * sizeOutTileH;
 
       uint32_t resizedOutTileH = sizeOutTileH;
       uint32_t resizedInTileH = sizeInTileH;
-      if (tileH == nTileH-1) {
-        resizedOutTileH = out_h - tileH * sizeOutTileH;
+      if (tileHIdx == nTileH-1) {
+        resizedOutTileH = out_h - tileHIdx * sizeOutTileH;
         resizedInTileH = (resizedOutTileH -1) * stride_size + KH;
       }
 
-      if ((tileW != nTileW - 1)) {
+      if ((tileWIdx != nTileW - 1)) {
         conv_kernel(resizedOutTileH,
                     sizeOutTileW,
                     pad_size,
@@ -711,54 +1121,57 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
                     vtaCmdH
         );
       } else {
-        uint32_t sizeOutTileBoundaryW = out_w - tileW * sizeOutTileW;
+        uint32_t sizeOutTileBoundaryW = out_w - tileWIdx * sizeOutTileW;
         uint32_t sizeInTileBoundaryW = (sizeOutTileBoundaryW - 1) * stride_size + KW ;
 
-        conv_kernel(resizedOutTileH,
-                    sizeOutTileBoundaryW,
-                    pad_size,
-                    stride_size,
-                    x_pad_before,
-                    x_pad_after,
-                    y_pad_before,
-                    y_pad_after,
-                    outputWOffset,
-                    outputHOffset,
-                    resizedInTileH,
-                    sizeInTileBoundaryW,
-                    C,
-                    H,
-                    W,
-                    vta_input_buf,
-                    KN,
-                    KH,
-                    KW,
-                    vta_filter_buf,
-                    out_h,
-                    out_w,
-                    vta_output_buf,
-                    doRelu,
-                    shift,
-                    doBias,
-                    vta_bias_buf,
-                    vtaCmdH
+        conv_kernel2(resizedOutTileH,
+                     sizeOutTileBoundaryW,
+                     pad_size,
+                     stride_size,
+                     x_pad_before,
+                     x_pad_after,
+                     y_pad_before,
+                     y_pad_after,
+                     outputWOffset,
+                     outputHOffset,
+                     resizedInTileH,
+                     sizeInTileBoundaryW,
+                     C,
+                     H,
+                     W,
+                     vta_input_buf,
+                     KN,
+                     KH,
+                     KW,
+                     vta_filter_buf,
+                     out_h,
+                     out_w,
+                     vta_output_buf,
+                     doRelu,
+                     shift,
+                     doBias,
+                     vta_bias_buf,
+                     vtaCmdH
         );
       }
     }
   }
+  clock_t conv_stage2_end = clock();
   VTASynchronize(vtaCmdH, 1 << 31);
-  VTARuntimeShutdown();
-
-  VTABufferCopy(vta_output_buf, 0, output, 0, out_h * out_w * KN, 2);
+  clock_t conv_stage3_end = clock();
 
 
-  // end case
-  VTABufferFree(vta_output_buf);
+/*
+  std::cout<< "conv_stage0 : "<<((double)(conv_stage0_end - conv_stage0_start)/CLOCKS_PER_SEC*1000)<<std::endl;
+  std::cout<< "conv_stage1 : "<<((double)(conv_stage1_end - conv_stage0_end)/CLOCKS_PER_SEC*1000)<<std::endl;
+  std::cout<< "conv_stage2 : "<<((double)(conv_stage2_end - conv_stage1_end)/CLOCKS_PER_SEC*1000)<<std::endl;
+  std::cout<< "conv_stage3(sync) : "<<((double)(conv_stage3_end - conv_stage2_end)/CLOCKS_PER_SEC*1000)<<std::endl;
+*/
 
-  VTABufferFree(vta_input_buf);
-  VTABufferFree(vta_filter_buf);
-  if(doBias) {
-    VTABufferFree(vta_bias_buf);
-  }
+  vGemmUOpHandle.clear();
+  vAddUOpHandle.clear();
+  vResetUopHandle.clear();
+  vAluUopHandle.clear();
+  vShiftUopHandle.clear();
   return 0;
 }
