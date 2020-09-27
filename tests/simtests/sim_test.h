@@ -32,6 +32,7 @@ int conv17_test();
 int conv18_test();
 int conv19_test();
 int conv20_test();
+int conv21_test();
 int conv_2layer_test();
 int add_16_test();
 int gemm_16_test();
