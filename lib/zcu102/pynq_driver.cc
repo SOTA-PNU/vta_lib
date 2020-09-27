@@ -176,7 +176,7 @@ class VTADevice {
 
   void PrintProfilingInfo() {
     printf("event_type event_num GOPS Gbits read_latency read_bytes read_transactions write_latency write_bytes write_transactions gemm_count alu_count load_count exe_time begin_timestamp_us end_timestamp_us\n");
-    for (int i = 0; i < current_event_index_; i++) {v
+    for (int i = 0; i < current_event_index_; i++) {
       struct ProfileEvent *e = &event_buffer_[i];
       printf("%s %d %.3f %.3f %d %d %d %d %d %d %d %d %d %.3f %lld %lld\n",
              e->event_type == ProfileEvent::EventType::VTA_SYNC ? "VTA_SYNC" : "Unknown",
