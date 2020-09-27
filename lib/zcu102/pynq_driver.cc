@@ -105,8 +105,12 @@ struct ProfileEvent {
   uint32_t event_num;
   uint32_t ops;
   uint32_t read_write_bits;
+  uint32_t read_bytes;
   uint32_t read_latency;
+  uint32_t read_transactions;
+  uint32_t write_bytes;
   uint32_t write_latency;
+  uint32_t write_transactions;
   uint32_t gemm_count;
   uint32_t alu_count;
   uint32_t load_count;
@@ -154,12 +158,8 @@ class VTADevice {
     VTAUnmapRegister(vta_load_handle_);
     VTAUnmapRegister(vta_compute_handle_);
     VTAUnmapRegister(vta_store_handle_);
-
     if (PROFILE_ENABLE) {
-      for (int i = 0; i < current_event_index_; i++) {
-        event_buffer_[current_event_index_].exe_time = (double)(event_buffer_[current_event_index_].end_timestamp_us - event_buffer_[current_event_index_].begin_timestamp_us) / 1000;
-        PrintProfilingInfo(&event_buffer_[i]);
-      }
+      PrintProfilingInfo();
 
       double total_time = 0.0;
       double total_vta_time = 0.0;
@@ -174,21 +174,29 @@ class VTADevice {
     }
   }
 
-  void PrintProfilingInfo(ProfileEvent* e) {
-    printf("event_type %s, event_num %d, GOPS %.3f, Gbits %.3f, read_latency %d, write_latency %d, gemm_count %d, alu_count %d, load_count %d, exe_time %.3f, begin_timestamp_us %lld, end_timestamp_us %lld\n",
-      e->event_type == ProfileEvent::EventType::VTA_SYNC ? "VTA_SYNC" : "Unknown",
-      e->event_num,
-      (double)e->ops / e->exe_time / 1000000,
-      (double)e->read_write_bits / e->exe_time / 1000000,
-      e->read_latency,
-      e->write_latency,
-      e->gemm_count,
-      e->alu_count,
-      e->load_count,
-      e->exe_time,
-      e->begin_timestamp_us,
-      e->end_timestamp_us
-    );
+  void PrintProfilingInfo() {
+    printf("event_type event_num GOPS Gbits read_latency read_bytes read_transactions write_latency write_bytes write_transactions gemm_count alu_count load_count exe_time begin_timestamp_us end_timestamp_us\n");
+    for (int i = 0; i < current_event_index_; i++) {v
+      struct ProfileEvent *e = &event_buffer_[i];
+      printf("%s %d %.3f %.3f %d %d %d %d %d %d %d %d %d %.3f %lld %lld\n",
+             e->event_type == ProfileEvent::EventType::VTA_SYNC ? "VTA_SYNC" : "Unknown",
+             e->event_num,
+             (double)e->ops / e->exe_time / 1000000,
+             (double)e->read_write_bits / e->exe_time / 1000000,
+             e->read_latency,
+             e->read_bytes,
+             e->read_transactions,
+             e->write_latency,
+             e->write_bytes,
+             e->write_transactions,
+             e->gemm_count,
+             e->alu_count,
+             e->load_count,
+             e->exe_time,
+             e->begin_timestamp_us,
+             e->end_timestamp_us
+      );
+    }
   }
 
   int Run(vta_phy_addr_t insn_phy_addr,
@@ -267,7 +275,12 @@ class VTADevice {
       event_buffer_[current_event_index_].ops = ops;
       event_buffer_[current_event_index_].read_write_bits = read_write_bits;
       event_buffer_[current_event_index_].read_latency = slot1_rd_latency;
+      event_buffer_[current_event_index_].read_transactions = slot1_rd_transactions;
       event_buffer_[current_event_index_].write_latency = slot2_wr_latency;
+      event_buffer_[current_event_index_].read_bytes = slot1_rd_bytes;
+      event_buffer_[current_event_index_].write_bytes = slot2_wr_bytes;
+      event_buffer_[current_event_index_].write_transactions = slot2_wr_transactions;
+
       event_buffer_[current_event_index_].event_type = ProfileEvent::EventType::VTA_SYNC;
       event_buffer_[current_event_index_].event_num = current_event_index_;
       event_buffer_[current_event_index_].gemm_count = gemm_count;
