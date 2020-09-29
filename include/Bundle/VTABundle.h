@@ -34,6 +34,8 @@ int avgpool(int8_t* input, float inputScale, int32_t inputOffset, int8_t *output
             dim_t outputDim0, dim_t outputDim1, dim_t outputDim2, dim_t outputDim3,
             unsigned_t KH, unsigned_t KW, unsigned_t pad_size, unsigned_t stride_size);
 
+int relu(int8_t* input, int8_t *output, unsigned_t size);
+
 int quantize(int8_t *input, int8_t *output, uint64_t size, float scale, int32_t offset);
 
 int dequantize(int8_t *input, int8_t *output, uint64_t size, float scale, int32_t offset);

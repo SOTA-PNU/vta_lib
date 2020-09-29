@@ -235,7 +235,7 @@ void fwdVTAConvolutionInstQuantizedImpl(
 void fwdConvolutionInstQuantizedImpl(
         Tensor *inV, Tensor *outV, Tensor *filterV, Tensor *biasV,
         llvm::ArrayRef<unsigned_t> kernelSizes, llvm::ArrayRef<unsigned_t> strides,
-        llvm::ArrayRef<unsigned_t> pads, size_t group, size_t dilation) {
+        llvm::ArrayRef<unsigned_t> pads, size_t group, size_t dilation, bool doRelu) {
   auto inW = inV->getHandle<int8_t>();
   auto outW = outV->getHandle<int8_t>();
   auto filterW = filterV->getHandle<int8_t>();
@@ -317,6 +317,9 @@ void fwdConvolutionInstQuantizedImpl(
             // Add the bias.
             sum += B;
 
+            if(doRelu && sum<0){
+              sum = 0;
+            }
             // Scale the result back to the expected destination scale.
 
             outW.at({n, ax, ay, d}) = quantization::clip<int32_t, int8_t>(
@@ -331,7 +334,6 @@ void fwdConvolutionInstQuantizedImpl(
 int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                       int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
                       int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
-  assert(doRelu==0);
   llvm::SmallVector<dim_t, 4> inputDims = {N,H,W,C};
   Type inputType(ElemKind::Int8QTy, inputDims, inputScale, inputOffset);
   Tensor inV((void*)input, &inputType);
@@ -399,12 +401,13 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
             &inV, &outV, &filterV, biasV,
             kernelSizes, strides,
             pads, group, dilation);
+    assert(0);
   }
   else {
     fwdConvolutionInstQuantizedImpl(
             &inV, &outV, &filterV, biasV,
             kernelSizes, strides,
-            pads, group, dilation);
+            pads, group, dilation, doRelu);
   }
   return 0;
 }
@@ -582,6 +585,16 @@ int maxpool(int8_t* input, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, u
   fwdMaxPool<int8_t>(&inputs, &outputs, kernelShape, strideShape, padShape);
   return 0;
 
+}
+
+int relu(int8_t* input, int8_t *output, unsigned_t size){
+  for(int i = 0; i < size; i ++){
+    if(input[i]>0)
+      output[i]=input[i];
+    else
+      output[i]=0;
+  }
+  return 0;
 }
 
 void fwdAvgPoolInstI8Impl(Tensor *inW, Tensor *outW,
