@@ -68,4 +68,6 @@ void transpose_nhwc2vtaio(int8_t* input, int8_t* output, int N, int H, int W, in
 void transpose_nhwc2vtak(int8_t* input, int8_t* output, int KN, int KH, int KW, int C);
 
 void transpose_vtaio2nhwc(int8_t* input, int8_t* output, int N, int H, int W, int C);
+
+void transpose_vtak2nhwc(int8_t* input, int8_t* output, int KN, int KH, int KW, int C);
 #endif //VTALIB_EXAMPLE_VTABUNDLE_H
