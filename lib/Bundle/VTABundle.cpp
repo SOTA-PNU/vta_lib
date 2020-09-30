@@ -1157,7 +1157,7 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
     free(transposed_output);
   }
 #endif
-
+/*
   vGemmUOpHandle.clear();
   vAddUOpHandle.clear();
   vResetUopHandle.clear();
@@ -1165,5 +1165,6 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
   vMaxUopHandle.clear();
   vMinUopHandle.clear();
   vShiftUopHandle.clear();
+  */
   return 0;
 }
