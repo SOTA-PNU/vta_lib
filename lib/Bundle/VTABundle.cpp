@@ -729,56 +729,6 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
     VTABufferCopy(bias, 0, vta_bias_buf, 0, KN * 4, 1);
   }
 
-  int8_t* dbg_input = (int8_t* )VTABufferGetVirtAddr(vta_input_buf);
-  int8_t* dbg_kernel = (int8_t* )VTABufferGetVirtAddr(vta_filter_buf);
-  int8_t* dbg_bias = (int8_t* )VTABufferGetVirtAddr(vta_bias_buf);
-
-  {
-    std::ofstream fos("input.bin", std::ios::binary);
-    int16_t data16 = 0;
-    for (size_t i = 0, e = N * C * H * W; i < e; i++) {
-      auto data = dbg_input[i];
-      if (i % 2 == 0) {
-        data16 = 0xff & data;
-      } else {
-        data16 = data16 | data << 8;
-        fos.write((const char *)&data16, 2);
-      }
-    }
-    fos.close();
-  }
-
-  {
-    std::ofstream fos("kernel.bin", std::ios::binary);
-    int16_t data16 = 0;
-    for (size_t i = 0, e = KN * KH * KW * C; i < e; i++) {
-      auto data = dbg_kernel[i];
-      if (i % 2 == 0) {
-        data16 = 0xff & data;
-      } else {
-        data16 = data16 | data << 8;
-        fos.write((const char *)&data16, 2);
-      }
-    }
-    fos.close();
-  }
-
-
-  {
-    std::ofstream fos("bias.bin", std::ios::binary);
-    int16_t data16 = 0;
-    for (size_t i = 0, e = KN * 4; i < e; i++) {
-      auto data = dbg_bias[i];
-      if (i % 2 == 0) {
-        data16 = 0xff & data;
-      } else {
-        data16 = data16 | data << 8;
-        fos.write((const char *)&data16, 2);
-      }
-    }
-    fos.close();
-  }
-
   uint32_t nTileW, nTileH;
   uint32_t sizeOutTileW = tile_w;
   uint32_t sizeOutTileH = tile_h;
@@ -883,18 +833,22 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
     }
   }
   VTASynchronize(vtaCmdH, 1 << 31);
-  VTARuntimeShutdown();
+
 
   VTABufferCopy(vta_output_buf, 0, out_VTA, 0, out_h * out_w * KN, 2);
 
 
-  int8_t* dbg_out = (int8_t* )VTABufferGetVirtAddr(vta_output_buf);
+#ifdef VTA_DEBUG_MODE
+
+  int8_t* dbg_input = (int8_t* )VTABufferGetVirtAddr(vta_input_buf);
+  int8_t* dbg_kernel = (int8_t* )VTABufferGetVirtAddr(vta_filter_buf);
+  int8_t* dbg_bias = (int8_t* )VTABufferGetVirtAddr(vta_bias_buf);
 
   {
-    std::ofstream fos("output.bin", std::ios::binary);
+    std::ofstream fos("input.bin", std::ios::binary);
     int16_t data16 = 0;
-    for (size_t i = 0, e = out_h * out_w * KN; i < e; i++) {
-      auto data = dbg_out[i];
+    for (size_t i = 0, e = N * C * H * W; i < e; i++) {
+      auto data = dbg_input[i];
       if (i % 2 == 0) {
         data16 = 0xff & data;
       } else {
@@ -905,6 +859,101 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
     fos.close();
   }
 
+  {
+    std::ofstream fos("kernel.bin", std::ios::binary);
+    int16_t data16 = 0;
+    for (size_t i = 0, e = KN * KH * KW * C; i < e; i++) {
+      auto data = dbg_kernel[i];
+      if (i % 2 == 0) {
+        data16 = 0xff & data;
+      } else {
+        data16 = data16 | data << 8;
+        fos.write((const char *)&data16, 2);
+      }
+    }
+    fos.close();
+  }
+
+
+  {
+    if(doBias) {
+      std::ofstream fos("bias.bin", std::ios::binary);
+      int16_t data16 = 0;
+      for (size_t i = 0, e = KN * 4; i < e; i++) {
+        auto data = dbg_bias[i];
+        if (i % 2 == 0) {
+          data16 = 0xff & data;
+        } else {
+          data16 = data16 | data << 8;
+          fos.write((const char *)&data16, 2);
+        }
+      }
+      fos.close();
+    }
+  }
+
+  int8_t *transposed_output = (int8_t *)malloc(KN * out_h * out_w);
+  transpose_vtaio2nhwc((int8_t *)VTABufferGetVirtAddr(vta_output_buf),
+                       transposed_output, N, out_h, out_w, KN);
+
+  {
+    std::ofstream fos("output.bin", std::ios::binary);
+    int16_t data16 = 0;
+    for (size_t i = 0, e = out_h * out_w * KN; i < e; i++) {
+      auto data = transposed_output[i];
+      if (i % 2 == 0) {
+        data16 = 0xff & data;
+      } else {
+        data16 = data16 | data << 8;
+        fos.write((const char *)&data16, 2);
+      }
+    }
+    fos.close();
+  }
+
+  float nonvtascale = 1.0;
+  for (int i = 0; i < shift; i++) {
+    nonvtascale *= 2;
+  }
+  int8_t *temp_output = (int8_t *)malloc(out_h * out_w * KN);
+  int8_t *nhwc_input = (int8_t *)malloc( N * C * H * W);
+  int8_t *nhwc_weight = (int8_t *)malloc(  KN * KH * KW * C);
+  transpose_vtaio2nhwc(dbg_input, nhwc_input, N, H, W, C);
+  transpose_vtak2nhwc(dbg_kernel, nhwc_weight, KN, KH, KW, C);
+
+  nonvtaconvolution(nhwc_input, 1.0, 0,
+                    nhwc_weight, 1.0, 0,
+                    dbg_bias, 1.0, 0,
+                    temp_output, nonvtascale, 0, N, H, W, C, KN, KH, KW,
+                    pad_size, stride_size, 1, 1, doRelu, doBias, out_h, out_w);
+  {
+    {
+      std::ofstream fos("output2.bin", std::ios::binary);
+      int16_t data16 = 0;
+      for (size_t i = 0, e = out_h * out_w * KN; i < e; i++) {
+        auto data = temp_output[i];
+        if (i % 2 == 0) {
+          data16 = 0xff & data;
+        } else {
+          data16 = data16 | data << 8;
+          fos.write((const char *)&data16, 2);
+        }
+      }
+      fos.close();
+    }
+  }
+  for(int h=0; h<out_h; h++){
+    for(int w=0; w<out_w; w++){
+      for(int c=0; c<KN; c++){
+        uint32_t pos = h*out_w*KN + w*KN + c;
+        assert(temp_output[pos]==transposed_output[pos]);
+      }
+    }
+  }
+
+
+
+#endif
 
   // end case
   VTABufferFree(vta_input_buf);
@@ -941,6 +990,8 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
   free(in_NC_HW16);
   free(filter_N_C_HW1616);
 
+  VTARuntimeShutdown();
+
   vGemmUOpHandle.clear();
   vAddUOpHandle.clear();
   vResetUopHandle.clear();
@@ -965,10 +1016,11 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
   void *vta_output_buf = output;
   void *vta_bias_buf = bias;
 
+#ifdef VTA_DEBUG_MODE
   int8_t *dbg_input = (int8_t *)VTABufferGetVirtAddr(vta_input_buf);
   int8_t *dbg_kernel = (int8_t *)VTABufferGetVirtAddr(vta_filter_buf);
   int8_t *dbg_bias = (int8_t *)VTABufferGetVirtAddr(vta_bias_buf);
-#ifdef VTA_DEBUG_MODE
+
   {
     std::ofstream fos("input.bin", std::ios::binary);
     int16_t data16 = 0;
@@ -1000,18 +1052,20 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
   }
 
   {
-    std::ofstream fos("bias.bin", std::ios::binary);
-    int16_t data16 = 0;
-    for (size_t i = 0, e = KN * 4; i < e; i++) {
-      auto data = dbg_bias[i];
-      if (i % 2 == 0) {
-        data16 = 0xff & data;
-      } else {
-        data16 = data16 | data << 8;
-        fos.write((const char *)&data16, 2);
+    if (doBias) {
+      std::ofstream fos("bias.bin", std::ios::binary);
+      int16_t data16 = 0;
+      for (size_t i = 0, e = KN * 4; i < e; i++) {
+        auto data = dbg_bias[i];
+        if (i % 2 == 0) {
+          data16 = 0xff & data;
+        } else {
+          data16 = data16 | data << 8;
+          fos.write((const char *)&data16, 2);
+        }
       }
+      fos.close();
     }
-    fos.close();
   }
 
   clock_t conv_stage0_end = clock();
@@ -1093,7 +1147,6 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
     transpose_vtaio2nhwc((int8_t *)VTABufferGetVirtAddr(vta_output_buf),
                          transposed_output, N, out_h, out_w, KN);
 
-    // int8_t *dbg_out = (int8_t *)VTABufferGetVirtAddr(vta_output_buf);
     {
       std::ofstream fos("output.bin", std::ios::binary);
       int16_t data16 = 0;
