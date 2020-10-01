@@ -593,9 +593,6 @@ void conv_kernel(uint32_t sizeOutTileH,
     }
 
     for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
-
-      //yongin temp
-      //if(threadIdx ==1) continue;
       uint32_t outputSramBaseAddr = threadIdx * ACC_MEM_ENTRY / nVirtualThread;
       VTADepPop(vtaCmdH, 2, 3);
 
