@@ -586,13 +586,15 @@ int maxpool(int8_t* input, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, u
 
 }
 
-int relu(int8_t* input, int8_t *output, unsigned_t size){
+int relu(int8_t* input, int8_t *output, unsigned_t size, float inputScale, float outputScale){
   for(int i = 0; i < size; i ++){
     if(input[i]>0)
       output[i]=input[i];
     else
       output[i]=0;
+    output[i] *= (int)(inputScale/outputScale);
   }
+
   return 0;
 }
 
