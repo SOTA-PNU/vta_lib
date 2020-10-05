@@ -1002,6 +1002,243 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
   return 0;
 }
 
+int convolution_wo_tr_wo_ch(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
+                      int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w) {
+
+  int tileWSize = 14;
+  int tileHSize = 14;
+  int nVirtualThread = 1;
+  int8_t *in_NC_HW16 = input;
+  int8_t *filter_N_C_HW1616 = kernel;
+#ifdef VTA_DEBUG_MODE
+  clock_t conv_stage0_start = clock();
+#endif
+
+
+  void *vta_input_buf = VTABufferAlloc(N * C * H * W);
+  // vta's filter buffer, as the same size of filter_N_C_HW1616[KN/16][C/16][KH][KW][16][16];
+  void *vta_filter_buf = VTABufferAlloc(KN * KH * KW * C);
+  void *vta_output_buf = VTABufferAlloc(out_h * out_w * KN);
+  void *vta_bias_buf;
+  if(doBias) {
+    vta_bias_buf = VTABufferAlloc(KN * 4);
+  }
+  VTABufferCopy(input, 0, vta_input_buf, 0, N * C * H * W, 1);
+  VTABufferCopy(kernel, 0, vta_filter_buf, 0, KN * KH * KW * C, 1);
+
+  if(doBias) {
+    VTABufferCopy(bias, 0, vta_bias_buf, 0, KN * 4, 1);
+  }
+
+
+#ifdef VTA_DEBUG_MODE
+  int8_t *dbg_input = (int8_t *)VTABufferGetVirtAddr(vta_input_buf);
+  int8_t *dbg_kernel = (int8_t *)VTABufferGetVirtAddr(vta_filter_buf);
+  int8_t *dbg_bias = (int8_t *)VTABufferGetVirtAddr(vta_bias_buf);
+
+  {
+    std::ofstream fos("input.bin", std::ios::binary);
+    int16_t data16 = 0;
+    for (size_t i = 0, e = N * C * H * W; i < e; i++) {
+      auto data = dbg_input[i];
+      if (i % 2 == 0) {
+        data16 = 0xff & data;
+      } else {
+        data16 = data16 | data << 8;
+        fos.write((const char *)&data16, 2);
+      }
+    }
+    fos.close();
+  }
+
+  {
+    std::ofstream fos("kernel.bin", std::ios::binary);
+    int16_t data16 = 0;
+    for (size_t i = 0, e = KN * KH * KW * C; i < e; i++) {
+      auto data = dbg_kernel[i];
+      if (i % 2 == 0) {
+        data16 = 0xff & data;
+      } else {
+        data16 = data16 | data << 8;
+        fos.write((const char *)&data16, 2);
+      }
+    }
+    fos.close();
+  }
+
+  {
+    if (doBias) {
+      std::ofstream fos("bias.bin", std::ios::binary);
+      int16_t data16 = 0;
+      for (size_t i = 0, e = KN * 4; i < e; i++) {
+        auto data = dbg_bias[i];
+        if (i % 2 == 0) {
+          data16 = 0xff & data;
+        } else {
+          data16 = data16 | data << 8;
+          fos.write((const char *)&data16, 2);
+        }
+      }
+      fos.close();
+    }
+  }
+
+  clock_t conv_stage0_end = clock();
+#endif
+  uint32_t nTileW, nTileH;
+  uint32_t sizeOutTileW = tileWSize;
+  uint32_t sizeOutTileH = tileHSize;
+
+  uint32_t sizeInTileW = (sizeOutTileW - 1) * stride_size + KW;
+  uint32_t sizeInTileH = (sizeOutTileH - 1) * stride_size + KH;
+
+  int isRemainTileW = (out_w % sizeOutTileW) ? 1 : 0;
+  int isRemainTileH = (out_h % sizeOutTileH) ? 1 : 0;
+  nTileW = out_w / sizeOutTileW + isRemainTileW;
+  nTileH = out_h / sizeOutTileH + isRemainTileH;
+
+  VTACommandHandle vtaCmdH{nullptr};
+  vtaCmdH = VTATLSCommandHandle();
+  //VTASetDebugMode(vtaCmdH, VTA_DEBUG_DUMP_INSN | VTA_DEBUG_DUMP_UOP);
+  VTASetDebugMode(vtaCmdH, 0);
+#ifdef VTA_DEBUG_MODE
+  clock_t conv_stage1_end = clock();
+#endif
+  for (int tileHIdx = 0; tileHIdx < nTileH; tileHIdx++) {
+    for (int tileWIdx = 0; tileWIdx < nTileW; tileWIdx++) {
+      uint32_t x_pad_before = tileWIdx == 0 ? pad_size : 0;
+      uint32_t x_pad_after = tileWIdx == (nTileW - 1) ? pad_size : 0;
+      uint32_t y_pad_before = tileHIdx == 0 ? pad_size : 0;
+      uint32_t y_pad_after = tileHIdx == (nTileH - 1) ? pad_size : 0;
+      uint32_t outputWOffset = tileWIdx * sizeOutTileW;
+      uint32_t outputHOffset = tileHIdx * sizeOutTileH;
+
+      uint32_t resizedOutTileH = sizeOutTileH;
+      uint32_t resizedInTileH = sizeInTileH;
+      if (tileHIdx == nTileH - 1) {
+        resizedOutTileH = out_h - tileHIdx * sizeOutTileH;
+        resizedInTileH = (resizedOutTileH - 1) * stride_size + KH;
+      }
+
+      if ((tileWIdx != nTileW - 1)) {
+        conv_kernel(resizedOutTileH, sizeOutTileW, pad_size, stride_size,
+                    x_pad_before, x_pad_after, y_pad_before, y_pad_after,
+                    outputWOffset, outputHOffset, resizedInTileH, sizeInTileW,
+                    C, H, W, vta_input_buf, KN, KH, KW, vta_filter_buf, out_h,
+                    out_w, vta_output_buf, doRelu, shift, doBias, vta_bias_buf,
+                    vtaCmdH, nVirtualThread);
+      } else {
+        uint32_t sizeOutTileBoundaryW = out_w - tileWIdx * sizeOutTileW;
+        uint32_t sizeInTileBoundaryW =
+            (sizeOutTileBoundaryW - 1) * stride_size + KW;
+        conv_kernel(resizedOutTileH, sizeOutTileBoundaryW, pad_size,
+                    stride_size, x_pad_before, x_pad_after, y_pad_before,
+                    y_pad_after, outputWOffset, outputHOffset, resizedInTileH,
+                    sizeInTileBoundaryW, C, H, W, vta_input_buf, KN, KH, KW,
+                    vta_filter_buf, out_h, out_w, vta_output_buf, doRelu, shift,
+                    doBias, vta_bias_buf, vtaCmdH, nVirtualThread);
+      }
+    }
+  }
+
+#ifdef VTA_DEBUG_MODE
+  clock_t conv_stage2_end = clock();
+#endif
+  VTASynchronize(vtaCmdH, 1 << 31);
+
+  VTABufferCopy(vta_output_buf, 0, output, 0, out_h * out_w * KN, 2);
+
+
+
+
+#ifdef VTA_DEBUG_MODE
+  {
+    clock_t conv_stage3_end = clock();
+    std::cout<< "conv_stage0 : "<<((double)(conv_stage0_end - conv_stage0_start)/CLOCKS_PER_SEC*1000)<<std::endl;
+    std::cout<< "conv_stage1    : "<<((double)(conv_stage1_end - conv_stage0_end)/CLOCKS_PER_SEC*1000)<<std::endl;
+    std::cout<< "conv_stage2 :    "<<((double)(conv_stage2_end - conv_stage1_end)/CLOCKS_PER_SEC*1000)<<std::endl;
+    std::cout<<"conv_stage3(sync) : "<<((double)(conv_stage3_end - conv_stage2_end)/CLOCKS_PER_SEC*1000)<<std::endl;
+
+
+    int8_t *transposed_output = (int8_t *)malloc(KN * out_h * out_w);
+    transpose_vtaio2nhwc((int8_t *)VTABufferGetVirtAddr(vta_output_buf),
+                         transposed_output, N, out_h, out_w, KN);
+
+    {
+      std::ofstream fos("output.bin", std::ios::binary);
+      int16_t data16 = 0;
+      for (size_t i = 0, e = out_h * out_w * KN; i < e; i++) {
+        auto data = transposed_output[i];
+        if (i % 2 == 0) {
+          data16 = 0xff & data;
+        } else {
+          data16 = data16 | data << 8;
+          fos.write((const char *)&data16, 2);
+        }
+      }
+      fos.close();
+    }
+
+
+    float nonvtascale = 1.0;
+    for (int i = 0; i < shift; i++) {
+      nonvtascale *= 2;
+    }
+    int8_t *temp_output = (int8_t *)malloc(out_h * out_w * KN);
+    int8_t *nhwc_input = (int8_t *)malloc( N * C * H * W);
+    int8_t *nhwc_weight = (int8_t *)malloc(  KN * KH * KW * C);
+    transpose_vtaio2nhwc(dbg_input, nhwc_input, N, H, W, C);
+    transpose_vtak2nhwc(dbg_kernel, nhwc_weight, KN, KH, KW, C);
+
+    nonvtaconvolution(nhwc_input, 1.0, 0,
+                      nhwc_weight, 1.0, 0,
+                      dbg_bias, 1.0, 0,
+                      temp_output, nonvtascale, 0, N, H, W, C, KN, KH, KW,
+                      pad_size, stride_size, 1, 1, doRelu, doBias, out_h, out_w);
+    {
+      {
+        std::ofstream fos("output2.bin", std::ios::binary);
+        int16_t data16 = 0;
+        for (size_t i = 0, e = out_h * out_w * KN; i < e; i++) {
+          auto data = temp_output[i];
+          if (i % 2 == 0) {
+            data16 = 0xff & data;
+          } else {
+            data16 = data16 | data << 8;
+            fos.write((const char *)&data16, 2);
+          }
+        }
+        fos.close();
+      }
+    }
+
+    for(int h=0; h<out_h; h++){
+      for(int w=0; w<out_w; w++){
+        for(int c=0; c<KN; c++){
+          uint32_t pos = h*out_w*KN + w*KN + c;
+          assert(temp_output[pos]==transposed_output[pos]);
+        }
+      }
+    }
+
+    free(temp_output);
+    free(nhwc_input);
+    free(nhwc_weight);
+    free(transposed_output);
+  }
+#endif
+/*
+  vGemmUOpHandle.clear();
+  vAddUOpHandle.clear();
+  vResetUopHandle.clear();
+  vReluUopHandle.clear();
+  vMaxUopHandle.clear();
+  vMinUopHandle.clear();
+  vShiftUopHandle.clear();
+  */
+  return 0;
+}
+
 int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
                        int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, void* vtaCmdH, int nVirtualThread, int tileHSize, int tileWSize) {
 
