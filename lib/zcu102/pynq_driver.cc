@@ -136,7 +136,7 @@ static int log_count = 0;
 #define COMPUTE_GEMM_COUNT_OFFSET 0x60
 #define COMPUTE_ALU_COUNT_OFFSET 0x70
 
-#define PROFILE_ENABLE 1
+#define PROFILE_ENABLE 0
 
 
 class VTADevice {
