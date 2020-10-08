@@ -760,6 +760,25 @@ int elemadd(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *inp
   return 0;
 }
 
+int elemadd_relu(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+            int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
+  for (dim_t i = 0, e = size; i < e; i++) {
+    int32_t L = input0[i];
+    int32_t R = input1[i];
+
+    // We increase the size of the integer up to 16 bits to prevent overflow.
+    const float largeScale = float(1) / (1 << 15);
+    // Scale both sides from 8-bit to 16-bits.
+    int32_t L32 = std::round(float(L - input0Offset) * (input0Scale / largeScale));
+    int32_t R32 = std::round(float(R - input1Offset) * (input1Scale / largeScale));
+    int32_t sum32 = L32 + R32;
+    sum32 = std::round(float(sum32) * (largeScale / destScale) + destOffset);
+    output[i] = quantization::clip<int32_t, int8_t>(sum32);
+    if(output[i]<0) output[i]=0;
+  }
+  return 0;
+}
+
 
 int elemsub(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
