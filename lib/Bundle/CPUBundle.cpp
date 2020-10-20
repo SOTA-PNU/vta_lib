@@ -1047,37 +1047,62 @@ int avgpool(int8_t* input, float inputScale, int32_t inputOffset, int8_t *output
 }
 
 int quantize(int8_t *input, int8_t *output, dim_t size, float scale, int32_t offset){
-  llvm::SmallVector<dim_t, 1> inputDims = {size};
-  Type inputType(ElemKind::FloatTy, inputDims);
-  Tensor inputs((void*)input, &inputType);
-
-
-  llvm::SmallVector<dim_t, 1> outputDims = {size};
-  Type outputType(ElemKind::Int8QTy, outputDims, scale, offset);
-  Tensor outputs((void*)output, &outputType);
-
-  auto destTy = outputs.getType();
-  Tensor qTensor = quantization::quantizeTensor(
-          inputs, {destTy.getScale(), destTy.getOffset()},
-          destTy.getElementType());
-  outputs.assign(&qTensor);
+  const float32x4_t       scale_v = vdupq_n_f32( 1.0f / scale);
+  assert(size%16==0);
+  
+  //printf("scale:%f\n",scale);
+  float32_t* in = (float32_t*)input;
+  for(int i=0;i<size;i+=16)
+  {
+    //const float32x4x4_t src = vld1q_f32_x4(in + i);
+    const float32x4_t s1 = vld1q_f32(in + i);
+    const float32x4_t s2 = vld1q_f32(in + i + 4);
+    const float32x4_t s3 = vld1q_f32(in + i + 8);
+    const float32x4_t s4 = vld1q_f32(in + i + 12);
+    //vcvtaq�ݿø��� ���� �ȸ���
+    //vcttnq�� �ؾ���. round even to zero
+    const int32x4x4_t rf =
+    {
+        {
+            vcvtnq_s32_f32(vmulq_f32(s1, scale_v)),
+            vcvtnq_s32_f32(vmulq_f32(s2, scale_v)),
+            vcvtnq_s32_f32(vmulq_f32(s3, scale_v)),
+            vcvtnq_s32_f32(vmulq_f32(s4, scale_v)),
+        }
+    };  
+    const int8x8_t pa = vqmovn_s16(vcombine_s16(vqmovn_s32(rf.val[0]), vqmovn_s32(rf.val[1])));
+    const int8x8_t pb = vqmovn_s16(vcombine_s16(vqmovn_s32(rf.val[2]), vqmovn_s32(rf.val[3])));
+    vst1q_s8(output + i, vcombine_s8(pa, pb));
+  }
   return 0;
 }
 
 int dequantize(int8_t *input, int8_t *output, dim_t size, float scale, int32_t offset){
-  llvm::SmallVector<dim_t, 1> inputDims = {size};
-  Type inputType(ElemKind::Int8QTy, inputDims, scale, offset);
-  Tensor inputs((void*)input, &inputType);
+  // output is type float*
 
+  const float32x4_t       scale_v = vdupq_n_f32(scale);
+  
+  // only for size%8 ==0
+  assert(size%8==0);
 
-  llvm::SmallVector<dim_t, 1> outputDims = {size};
-  Type outputType(ElemKind::FloatTy, outputDims);
-  Tensor outputs((void*)output, &outputType);
+  float32_t *out = (float32_t*)output;
 
-  auto destTy = outputs.getType();
-  Tensor qTensor = quantization::dequantizeTensor(
-          inputs, destTy.getElementType());
-  outputs.assign(&qTensor);
+  for(int i=0;i<size/8;i++)
+  {
+      const int8x8_t     a = vld1_s8(input + i*8);
+
+      const float32x4x2_t af =
+      {
+              {
+                  vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(a)))), scale_v),
+                  vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(a)))),  scale_v),
+              }
+      };
+
+      //vst1q_f32_x2(out+i*8, af);
+      vst1q_f32(out+i*8, af.val[0]);
+      vst1q_f32(out+i*8+4, af.val[1]);
+  }
   return 0;
 }
 
