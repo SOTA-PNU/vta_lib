@@ -329,6 +329,57 @@ inline void nchw_to_nhwc_s8(
   }
 }
 */
+
+
+// from google gemmlowp
+// lhr 4x16n, rhr 16nx4. cell size = 4x(16xN). depth = 16n
+void mm_s8_4x16n(const int8_t *lhs_ptr, const int8_t *rhs_ptr, int32_t *accum_ptr, int depth)
+{
+    int32x4_t acc[4][4];
+    for (int i = 0; i < 4; i++)
+    {
+        for (int j = 0; j < 4; j++)
+        {
+            acc[i][j] = vdupq_n_s32(0);
+        }
+    }
+    for (int d = 0; d < depth; d += 16)
+    {
+        int8x16_t lhs[4];
+        for (int i = 0; i < 4; i++)
+        {
+            lhs[i] = vld1q_s8(lhs_ptr + 16 * i);
+        }
+        int8x16_t rhs[4];
+        for (int i = 0; i < 4; i++)
+        {
+            rhs[i] = vld1q_s8(rhs_ptr + 16 * i);
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            for (int j = 0; j < 4; j++)
+            {
+                int16x8_t local_acc =
+                    vmull_s8(vget_low_s8(lhs[i]), vget_low_s8(rhs[j]));
+                local_acc =
+                    vmlal_s8(local_acc, vget_high_s8(lhs[i]), vget_high_s8(rhs[j]));
+                acc[i][j] = vpadalq_s16(acc[i][j], local_acc);
+            }
+        }
+        lhs_ptr += 64;
+        rhs_ptr += 16 * 4;
+    }
+    for (int i = 0; i < 4; i++)
+    {
+        int32x4_t acc_2x_0 = vpaddq_s32(acc[0][i], acc[1][i]);
+        int32x4_t acc_2x_1 = vpaddq_s32(acc[2][i], acc[3][i]);
+        int32x4_t acc_4x = vpaddq_s32(acc_2x_0, acc_2x_1);
+        int32x4_t dst_val = vld1q_s32(accum_ptr + 4 * i);
+        dst_val = vaddq_s32(dst_val, acc_4x);
+        vst1q_s32(accum_ptr + 4 * i, dst_val);
+    }
+}
+
 void fwdConvolutionInstFloatImpl(
         Tensor *inV, Tensor *outV, Tensor *filterV, Tensor *biasV,
         llvm::ArrayRef<unsigned_t> kernelSizes, llvm::ArrayRef<unsigned_t> strides,
