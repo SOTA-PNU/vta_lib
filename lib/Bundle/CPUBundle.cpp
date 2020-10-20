@@ -1103,7 +1103,7 @@ int softmax(int8_t *input, int8_t *output, dim_t inDim0, dim_t inDim1,
 
 
 void debugprint(int8_t *input, unsigned_t size, std::string filename, bool isInt8 ) {
-  std::ofstream fos(filename, std::ios::binary);
+  std::ofstream fos(filename.c_str(), std::ios::binary);
 
   if(isInt8) {
     int16_t data16 = 0;
