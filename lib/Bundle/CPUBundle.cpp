@@ -13,7 +13,10 @@
 #include "glow/Base/Tensor.h"
 #include "glow/Quantization/Base/Base.h"
 
+#include <arm_neon.h>
 #include "vta/vtalib/include/Bundle/VTABundle.h"
+
+#define DEBUG_INFO  0
 
 using namespace std;
 using namespace glow;
@@ -744,18 +747,101 @@ int transpose(int8_t *input, int8_t *output, dim_t inDim0, dim_t inDim1, dim_t i
 
 int elemadd(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
-  for (dim_t i = 0, e = size; i < e; i++) {
-    int32_t L = input0[i];
-    int32_t R = input1[i];
+  
+  assert(input0Offset==0);
+  assert(input1Offset==0);
 
-    // We increase the size of the integer up to 16 bits to prevent overflow.
-    const float largeScale = float(1) / (1 << 15);
-    // Scale both sides from 8-bit to 16-bits.
-    int32_t L32 = std::round(float(L - input0Offset) * (input0Scale / largeScale));
-    int32_t R32 = std::round(float(R - input1Offset) * (input1Scale / largeScale));
-    int32_t sum32 = L32 + R32;
-    sum32 = std::round(float(sum32) * (largeScale / destScale) + destOffset);
-    output[i] = quantization::clip<int32_t, int8_t>(sum32);
+
+  //use largeScale to prevent overflow
+  const float32x4_t i0scale  = vdupq_n_f32(input0Scale * (1<<15));
+  const float32x4_t i1scale  = vdupq_n_f32(input1Scale * (1<<15));
+  const float32x4_t invdscale  = vdupq_n_f32((float(1) / ((1<<15)) / destScale));
+   
+  // clip
+  const int32x4_t max = vdupq_n_s32(127);
+  const int32x4_t min = vdupq_n_s32(-128);
+
+#if DEBUG_INFO
+  printf("lio: %d rio: %d\n", input0Offset, input1Offset);
+  printf("largeInv: %f\n",(float(1) / ((1<<15)) / destScale));
+
+#endif
+
+  if(size%16 == 0)
+  {
+    for(int i=0; i<size; i+=16)
+    {
+    
+      
+        const int8x16_t     a = vld1q_s8(input0 + i);
+        const int32x4x4_t af =
+        {
+            {
+              // vget_low_s8 = 16���� 8���� ������
+              // vmovl_s8 = int8->int16(������ int16, int32�� ����)
+              // vget_low_s16 = int16*8 -> int 16*4
+              // vmovl_s16 = int16->int32 (float conv�� s32�� ����.)
+              // vcctq_f32_s32 = conv s32->f32
+
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_low_s8(a))))), i0scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_low_s8(a))))),  i0scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_high_s8(a))))),  i0scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_high_s8(a))))), i0scale)),
+            }
+        };
+        const int8x16_t     b = vld1q_s8(input1 + i);
+        const int32x4x4_t bf =
+        {
+            {
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_low_s8(b))))), i1scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_low_s8(b))))),  i1scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_high_s8(b))))), i1scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_high_s8(b))))),  i1scale)),
+            }
+        };          
+        //���� �ڵ尡 ������ roundó�� �� �ڿ� �ٽ� float�� �ٲ� ó���ϱ⶧���� �����ϰ� ó��
+        const int32x4x4_t rf =
+        {
+            {
+
+                vmaxq_s32(vminq_s32(vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vaddq_s32(af.val[0], bf.val[0])), invdscale)), max),min),
+                vmaxq_s32(vminq_s32(vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vaddq_s32(af.val[1], bf.val[1])), invdscale)), max),min),
+                vmaxq_s32(vminq_s32(vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vaddq_s32(af.val[2], bf.val[2])), invdscale)), max),min),
+                vmaxq_s32(vminq_s32(vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vaddq_s32(af.val[3], bf.val[3])), invdscale)), max),min),
+            }
+        };
+        const int8x8_t pa = vqmovn_s16(vcombine_s16(vqmovn_s32(rf.val[0]), vqmovn_s32(rf.val[1])));
+        const int8x8_t pb = vqmovn_s16(vcombine_s16(vqmovn_s32(rf.val[2]), vqmovn_s32(rf.val[3])));
+        vst1q_s8(output + i, vcombine_s8(pa, pb));
+
+#if DEBUG_INFO
+
+        // load org
+        int8_t aa[32],bb[32];
+        vst1q_s8(aa,a);
+        vst1q_s8(bb,b);     
+        for(int k=0;k<16;k++)
+        {
+          printf("(%d,%d) ", aa[k],bb[k]);
+        }
+        printf("\n");
+        
+        int at[4],bt[4];
+        int rt[4];
+
+        for(int k=0;k<4;k++)
+        {
+          vst1q_s32(at, af.val[k]);
+          vst1q_s32(bt, bf.val[k]);            
+          vst1q_s32(rt, rf.val[k]);  
+          for(int j=0;j<4;j++) 
+          {
+            int idx=i+k*4+j;
+            printf("[%d]  l:%d r:%d sum32:%d o:%d \n",idx, at[j], rt[j], rt[j],output[idx]);
+          }
+        }
+#endif          
+    }
   }
   return 0;
 }
@@ -782,35 +868,134 @@ int elemadd_relu(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t
 
 int elemsub(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
-  for (dim_t i = 0, e = size; i < e; i++) {
-    int32_t L = input0[i];
-    int32_t R = input1[i];
 
-    float l = (input0Scale / destScale) * float(L - input0Offset);
-    float r = (input1Scale / destScale) * float(R - input1Offset);
-    int32_t q = std::round(l - r + destOffset);
-    output[i] = quantization::clip<int32_t, int8_t>(q);
+  assert(input0Offset==0);
+  assert(input1Offset==0);
+  assert(size%16==0);
+
+  // use largeScale to prevent overflow as elemadd
+  const float32x4_t i0scale  = vdupq_n_f32(input0Scale * (1<<15));
+  const float32x4_t i1scale  = vdupq_n_f32(input1Scale * (1<<15));
+  const float32x4_t invdscale  = vdupq_n_f32((float(1) / ((1<<15)) / destScale));
+  
+  // clip
+  const int32x4_t max = vdupq_n_s32(127);
+  const int32x4_t min = vdupq_n_s32(-128);
+
+#if DEBUG_INFO
+  printf("lio: %d rio: %d\n", input0Offset, input1Offset);
+  printf("largeInv: %f\n",(float(1) / ((1<<15)) / destScale));  
+#endif
+
+  if(size%16 == 0)
+  {
+    for(int i=0; i<size; i+=16)
+    {
+        const int8x16_t     a = vld1q_s8(input0 + i);
+        const int32x4x4_t af =
+        {
+            {
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_low_s8(a))))), i0scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_low_s8(a))))),  i0scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_high_s8(a))))),  i0scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_high_s8(a))))), i0scale)),
+            }
+        };
+        const int8x16_t     b = vld1q_s8(input1 + i);
+        const int32x4x4_t bf =
+        {
+            {
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_low_s8(b))))), i1scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_low_s8(b))))),  i1scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_high_s8(b))))), i1scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_high_s8(b))))),  i1scale)),
+            }
+        };          
+        const int32x4x4_t rf =
+        {
+            {
+                vmaxq_s32(vminq_s32(vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vsubq_s32(af.val[0], bf.val[0])), invdscale)), max),min),
+                vmaxq_s32(vminq_s32(vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vsubq_s32(af.val[1], bf.val[1])), invdscale)), max),min),
+                vmaxq_s32(vminq_s32(vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vsubq_s32(af.val[2], bf.val[2])), invdscale)), max),min),
+                vmaxq_s32(vminq_s32(vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vsubq_s32(af.val[3], bf.val[3])), invdscale)), max),min),
+            }
+        };
+        const int8x8_t pa = vqmovn_s16(vcombine_s16(vqmovn_s32(rf.val[0]), vqmovn_s32(rf.val[1])));
+        const int8x8_t pb = vqmovn_s16(vcombine_s16(vqmovn_s32(rf.val[2]), vqmovn_s32(rf.val[3])));
+        vst1q_s8(output + i, vcombine_s8(pa, pb));
+    }
   }
   return 0;
 }
 
 int elemdiv(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
-  for (dim_t i = 0, e = size; i < e; i++) {
-    int32_t L = input0[i];
-    int32_t R = input1[i];
+#if DEBUG_INFO              
+  printf("elemdiv: i0s:%f i0o:%d  i1s:%f i1o:%d  ds:%f do:%d \n",input0Scale, input0Offset, input1Scale, input1Offset, destScale, destOffset);
+#endif
 
-    float l = (input0Scale) * float(L - input0Offset);
-    float r = input1Scale * destScale * float(R - input1Offset);
-    int32_t q = std::round(l / r + destOffset);
-    output[i] = quantization::clip<int32_t, int8_t>(q);
+  assert(input0Offset==0);
+  assert(input1Offset==0);
+  assert(size%16==0);
+
+  const float32x4_t i0scale  = vdupq_n_f32(input0Scale);
+  const float32x4_t i1scale  = vdupq_n_f32(input1Scale * destScale);
+
+  // clip
+  const int32x4_t max = vdupq_n_s32(127);
+  const int32x4_t min = vdupq_n_s32(-128);
+
+  if(size%16 == 0)
+  {
+    for(int i=0; i<size; i+=16)
+    {
+        const int8x16_t     a = vld1q_s8(input0 + i);
+        const float32x4x4_t af =
+        {
+            {
+                vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_low_s8(a))))), i0scale),
+                vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_low_s8(a))))),  i0scale),
+                vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_high_s8(a))))),  i0scale),
+                vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_high_s8(a))))), i0scale),
+            }
+        };
+        const int8x16_t     b = vld1q_s8(input1 + i);
+        const float32x4x4_t bf =
+        {
+            {
+                vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_low_s8(b))))), i1scale),
+                vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_low_s8(b))))),  i1scale),
+                vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_high_s8(b))))), i1scale),
+                vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_high_s8(b))))),  i1scale),
+            }
+        };          
+        //rounding to nearest with ties to away
+        const int32x4x4_t rf =
+        {
+            {
+                vmaxq_s32(vminq_s32(vcvtaq_s32_f32(vdivq_f32(af.val[0], bf.val[0])), max),min),
+                vmaxq_s32(vminq_s32(vcvtaq_s32_f32(vdivq_f32(af.val[1], bf.val[1])), max),min),
+                vmaxq_s32(vminq_s32(vcvtaq_s32_f32(vdivq_f32(af.val[2], bf.val[2])), max),min),
+                vmaxq_s32(vminq_s32(vcvtaq_s32_f32(vdivq_f32(af.val[3], bf.val[3])), max),min),
+            }
+        };
+        const int8x8_t pa = vqmovn_s16(vcombine_s16(vqmovn_s32(rf.val[0]), vqmovn_s32(rf.val[1])));
+        const int8x8_t pb = vqmovn_s16(vcombine_s16(vqmovn_s32(rf.val[2]), vqmovn_s32(rf.val[3])));
+        vst1q_s8(output + i, vcombine_s8(pa, pb));
+    }
   }
   return 0;
 }
 
 int splat(int8_t *output, unsigned_t size, int8_t value) {
-  for( int i = 0; i<size; i++ ){
-    output[i]=value;
+
+  //size = n * 16
+  assert(size%16==0);
+
+  const int8x16_t v = vdupq_n_s8(value);
+  for(int i=0; i<size; i+=16)
+  {
+    vst1q_s8(output+i, v);
   }
   return 0;
 }
@@ -818,19 +1003,64 @@ int splat(int8_t *output, unsigned_t size, int8_t value) {
 
 int elemmax(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
-  TensorQuantizationParams lhsQ{input0Scale, input0Offset};
-  TensorQuantizationParams rhsQ{input1Scale, input1Offset};
-  TensorQuantizationParams destQ{destScale, destOffset};
 
-  for (size_t i = 0, e = size; i < e; i++) {
-    // Convert both sides to the destination scale and perform a regular
-    // comparison.
-    int8_t L = quantization::quantize(
-            quantization::dequantize(input0[i], lhsQ), destQ);
-    int8_t R = quantization::quantize(
-            quantization::dequantize(input1[i], rhsQ), destQ);
-    output[i] = std::max(L, R);
-  }
+#if DEBUG_INFO
+  printf("elemmax: i0s:%f i0o:%d  i1s:%f i1o:%d  ds:%f do:%d \n",input0Scale, input0Offset, input1Scale, input1Offset, destScale, destOffset);    
+#endif
+
+  assert(input0Offset==0);
+  assert(input1Offset==0);
+  assert(size%16==0);
+
+  const float32x4_t i0scale  = vdupq_n_f32(input0Scale / destScale);
+  const float32x4_t i1scale  = vdupq_n_f32(input1Scale / destScale);
+   
+  // for clip s8
+  const int32x4_t max = vdupq_n_s32(127);
+  const int32x4_t min = vdupq_n_s32(-128);
+
+  //case 1. size = n * 16, offset = 0
+  if(size%16 == 0)
+  {
+    int s = size/16;
+    for(int i=0; i<size; i+=16)
+    {
+        const int8x16_t   a = vld1q_s8(input0 + i);
+        const int32x4x4_t af =
+        {
+            {
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_low_s8(a))))), i0scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_low_s8(a))))),  i0scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_high_s8(a))))),  i0scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_high_s8(a))))), i0scale)),
+            }
+        };
+
+        const int8x16_t   b = vld1q_s8(input1 + i);
+        const int32x4x4_t bf =
+        {
+            {
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_low_s8(b))))), i1scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_low_s8(b))))),  i1scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(vmovl_s8(vget_high_s8(b))))), i1scale)),
+                vcvtaq_s32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(vmovl_s8(vget_high_s8(b))))),  i1scale)),
+            }
+        };          
+
+        const int32x4x4_t rf =
+        {
+            {
+                vmaxq_s32(vminq_s32(vmaxq_s32(af.val[0], bf.val[0]), max),min),
+                vmaxq_s32(vminq_s32(vmaxq_s32(af.val[1], bf.val[1]), max),min),
+                vmaxq_s32(vminq_s32(vmaxq_s32(af.val[2], bf.val[2]), max),min),
+                vmaxq_s32(vminq_s32(vmaxq_s32(af.val[3], bf.val[3]), max),min),
+            }
+        };
+        const int8x8_t pa = vqmovn_s16(vcombine_s16(vqmovn_s32(rf.val[0]), vqmovn_s32(rf.val[1])));
+        const int8x8_t pb = vqmovn_s16(vcombine_s16(vqmovn_s32(rf.val[2]), vqmovn_s32(rf.val[3])));
+        vst1q_s8(output + i, vcombine_s8(pa, pb));
+    }
+  }  
   return 0;
 }
 
