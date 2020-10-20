@@ -1093,6 +1093,255 @@ printf("o:%p - %p\n",output, output+width);
 
 }
 
+// nhwc input matrix to col
+/*
+void im2col_nhwc(int8_t* in, int8_t* out, int inw, int inh, int inch, int outw, int outh, int kernel_h, int kernel_w, int stride_h, int stride_w )
+{
+    const int stride = kernel_h * kernel_w * outw * outh;
+    
+    for (int p = 0; p < inch; p++)
+    {
+        const signed char* input_ch_p = in + (p* inw*inh );
+        int retID = stride * p;
+        for (int u = 0; u < kernel_h; u++)
+        {
+            for (int v = 0; v < kernel_w; v++)
+            {
+                for (int i = 0; i < outh; i++)
+                {
+                    for (int j = 0; j < outw; j++)
+                    {
+                        int row = u + i * stride_h;
+                        int col = v + j * stride_w;
+                        int index = row * inw + col;
+                        out[retID] = input_ch_p[index];
+                        retID++;
+                    }
+                }
+            }
+        }
+    }
+}
+*/
+inline void linearize_volume_nchw(const int8_t *const in_ptr,
+                                  int8_t *out_ptr,
+                                  int top_left_x,
+                                  int top_left_y,
+                                  int kernel_width,
+                                  int kernel_height,
+                                  int kernel_depth,
+                                  int input_w,
+                                  int input_h,
+                                  int input_stride_x,
+                                  int input_stride_y,
+                                  int input_stride_z,
+                                  int has_pads,
+                                  int pad_value,
+                                  int dilation_x,
+                                  int dilation_y,
+                                  int32_t input_offset)
+{
+    const int kernel_size2 = kernel_width * kernel_height;
+    const int x_e = top_left_x + kernel_width * dilation_x;
+    const int y_e = top_left_y + kernel_height * dilation_y;
+
+    // Linearize volume
+    int d = 0;
+    // This for loop linearize a volume with 3 slices. This allows:
+    // 1) to reduce the iterations of the outer for loop "d"
+    // 2) to have an optimized im2col for the first convolution layer where usually we have 3 IFMs
+    for (; d <= (kernel_depth - 3); d += 3)
+    {
+        for (int y = top_left_y; y < y_e; y += dilation_y)
+        {
+            if ((y < 0 || y >= input_h) && has_pads)
+            {
+                // All the values will be the offset (will be zeros when not quantized)
+                for (int x = top_left_x; x < x_e; x += dilation_x, ++out_ptr)
+                {
+                    *(out_ptr + 0 * kernel_size2) = pad_value;
+                    *(out_ptr + 1 * kernel_size2) = pad_value;
+                    *(out_ptr + 2 * kernel_size2) = pad_value;
+                }
+            }
+            else
+            {
+                for (int x = top_left_x; x < x_e; x += dilation_x, ++out_ptr)
+                {
+                    if ((x < 0 || x >= input_w) && has_pads)
+                    {
+                        *(out_ptr + 0 * kernel_size2) = pad_value;
+                        *(out_ptr + 1 * kernel_size2) = pad_value;
+                        *(out_ptr + 2 * kernel_size2) = pad_value;
+                    }
+                    else
+                    {
+                        *(out_ptr + 0 * kernel_size2) = *((in_ptr + ((d + 0) * input_stride_z + y * input_stride_y + x * input_stride_x))) - input_offset;
+                        *(out_ptr + 1 * kernel_size2) = *((in_ptr + ((d + 1) * input_stride_z + y * input_stride_y + x * input_stride_x)))  - input_offset;
+                        *(out_ptr + 2 * kernel_size2) = *((in_ptr + ((d + 2) * input_stride_z + y * input_stride_y + x * input_stride_x)))  - input_offset;
+                    }
+                }
+            }
+        }
+        out_ptr += 2 * kernel_size2;
+    }
+
+    // Left over
+    for (; d < kernel_depth; d++)
+    {
+        for (int y = top_left_y; y < y_e; y += dilation_y)
+        {
+            if ((y < 0 || y >= input_h) && has_pads)
+            {
+                // All the values will be the offset (will be zeros when not quantized)
+                memset(out_ptr, pad_value, kernel_width);
+                out_ptr += kernel_width;
+            }
+            else
+            {
+                for (int x = top_left_x; x < x_e; x += dilation_x, ++out_ptr)
+                {
+                    if ((x < 0 || x >= input_w) && has_pads)
+                    {
+                        *out_ptr = pad_value;
+                    }
+                    else
+                    {
+                        *out_ptr = *((in_ptr + (d * input_stride_z + y * input_stride_y + x * input_stride_x))) -  - input_offset;
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+// input nchw, output nchw
+void fwdConvolution_nchw(int8_t *input, int8_t *kernel, int8_t *bias, int8_t *output, 
+                      float inS, float kS, float bS, float outS,
+                      int32_t inOffset, int32_t filterOffset, int32_t biasOffset, int32_t outOffset,
+                      dim_t N, dim_t C, dim_t H, dim_t W, dim_t KN, dim_t KH, dim_t KW, int pad_size, int stride_size, size_t group,
+                      size_t dilation, bool doRelu, bool doBias, 
+                      int out_h, int out_w) {
+
+  // only support out_w is 4*n
+  assert(out_w %4 ==0);
+  
+  float outScale = outS;
+  float inScale = inS;
+  float filterScale = kS;
+  float biasScale = bS;
+
+  // Calculate the scale of the values that come out of the matrix
+  // multiplication part of the calculation.
+    float matMulScale = inScale * filterScale;
+    float scale = matMulScale / outScale;
+    float bscale = biasScale / matMulScale;  
+
+#if DEBUG_INFO
+  printf("off i:%d f:%d b:%d o:%d\n",inOffset,  filterOffset,  biasOffset,  outOffset);
+
+  printf("\nscale:%f\n", scale);
+  printf("bscale:%f\n",bscale);
+#endif
+
+
+  int8_t* flat_input = (int8_t*)malloc (KH*KW*C* out_h * out_w); // c= channel
+  int8_t* kernel_vec = (int8_t*)malloc (KH*KW*C); // 1 filter * channel
+  int32_t* mm_out_temp = (int32_t*)malloc(out_h*out_w*sizeof(int32_t)); // output of 1 filter for all channel
+  
+  
+  
+  // make patched input
+  // For each convolution 'jump' in the input tensor:
+  ssize_t x = -ssize_t(pad_size);
+  for (dim_t ax = 0; ax < out_h; x += stride_size, ax++) {  //H
+    ssize_t y = -ssize_t(pad_size);
+    for (dim_t ay = 0; ay < out_w; y += stride_size, ay++) { 
+       linearize_volume_nchw(input, flat_input + (ax * KH * KW * out_w * C) + (ay * KH * KW * C), x, y, KW, KH, KN, W, H, 1, W, W * H, pad_size > 0 ? 1 : 0, 0, 1, 1, inOffset);
+    
+#if DEBUG_INFO     
+      if(ax>4 && ay <4) 
+      {
+        for(int c=0;c<3;c++)
+        {
+        printf("\n(%d,%d - %d)[%d,%d]\n",x,y,c,KW,KH);
+        //ch0�� ���. 
+        for(int k=0;k<KW*KH;k++) { printf("%02x ",flat_input[k + (ax * KH * KW * out_w * C) + (ay * KH * KW * C)+ c*KH*KW]); if(k%7==6) printf("/ "); }
+
+        }
+      }
+#endif      
+      
+    }
+  }
+
+  // For each output channel in the group:
+  for (dim_t d = 0; d < KN; d++) {
+
+      // load 1 filter * all channel
+      memcpy(kernel_vec, kernel + KH * KW * C * d, KH * KW * C);
+
+#if DEBUG_INFO
+      printf("kernel %d\n",d);
+      for(int c=0;c<C;c++)
+      {
+        for (int j = 0; j < KH; j++)
+        {
+          for (int i = 0; i < KW; i++)
+            {
+                printf("%x ",kernel_vec[i + j * KW + c*KH*KW]);
+            }
+          printf(" / ");
+        }
+        printf("\n");
+      }
+#endif
+
+      vector_matrix_multiply_s8(kernel_vec, flat_input, (int32_t *)mm_out_temp, KH * KW * C, out_h * out_w, KH * KW * C, filterOffset);
+      
+#if DEBUG_INFO
+    if(d<KN) 
+    {
+        
+        for (int j = 0; j < 2; j++)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                printf("%d ",mm_out_temp[i + j * out_w]+ *((int32_t*)bias+d));
+
+            }
+            printf("\n");
+        }
+        
+    }
+#endif
+
+    vector_scale_bias_offset_clip_s8(mm_out_temp, *((int32_t*)bias+d), output  + (d*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+  
+#if DEBUG_INFO
+    if(d<KN) 
+    {
+        
+        for (int j = 0; j < 2; j++)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                printf("(%d)",*(output  + (d*out_h*out_w) + i + j * out_w) );
+                if(i % 16 == 15) printf(" / ");
+            }
+            printf("\n");
+        }
+        
+    }
+#endif    
+
+  }
+
+ 
+  
+}
+
 void fwdConvolutionInstQuantizedImpl(
         Tensor *inV, Tensor *outV, Tensor *filterV, Tensor *biasV,
         llvm::ArrayRef<unsigned_t> kernelSizes, llvm::ArrayRef<unsigned_t> strides,
@@ -1195,49 +1444,15 @@ void fwdConvolutionInstQuantizedImpl(
 int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                       int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
                       int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
-  llvm::SmallVector<dim_t, 4> inputDims = {N,H,W,C};
-  Type inputType(ElemKind::Int8QTy, inputDims, inputScale, inputOffset);
-  Tensor inV((void*)input, &inputType);
-
-  llvm::SmallVector<dim_t, 4> outputDims = {N,(dim_t)out_h,(dim_t)out_w,KN};
-  Type outputType(ElemKind::Int8QTy, outputDims, outputScale, outputOffset);
-  Tensor outV((void*)output, &outputType);
-
-  llvm::SmallVector<dim_t, 4> kernelDims = {KN,KH,KW,C};
-  Type kernelType(ElemKind::Int8QTy, kernelDims, kernelScale, kernelOffset);
-  Tensor filterV((void*)kernel, &kernelType);
-
-  Tensor* biasV;
-  if(doBias) {
-    llvm::SmallVector<dim_t, 1> biasDims = {KN};
-    Type biasType(ElemKind::Int32QTy, biasDims, biasScale, biasOffset);
-    biasV = new Tensor((void *) bias, &biasType);
-  }
-  else{
-    biasV = new Tensor(ElemKind::Int32QTy, {KN}, 1.0, 0);
-    biasV->zero();
-  }
-
-  std::array<unsigned_t,2> kernelS = {(unsigned_t)KH, (unsigned_t)KW};
-  llvm::ArrayRef<unsigned_t> kernelSizes(kernelS);
-
-  std::array<unsigned_t,2> strideS = {(unsigned_t)stride_size, (unsigned_t)stride_size};
-  llvm::ArrayRef<unsigned_t> strides(strideS);
-
-  std::array<unsigned_t,4> padS = {(unsigned_t)pad_size, (unsigned_t)pad_size, (unsigned_t)pad_size, (unsigned_t)pad_size};
-  llvm::ArrayRef<unsigned_t> pads(padS);
 
 
-
-
-
-
+  //TODO: scale converting?
   float filterScale = kernelScale;
   filterScale = 1/filterScale;
   float inScale = inputScale;
   inScale = 1/inScale;
-  //float biasScale = biasScale;
-  biasScale = 1/biasScale;
+  float biScale = biasScale;
+  biScale = 1/biScale;
   float matMulScale = inScale * filterScale;
   float outScale = outputScale;
   outScale = 1/outScale;
@@ -1251,24 +1466,126 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
       tempScale *= 2;
       shift++;
     }
+  }  
+
+#if DEBUG_INFO
+  printf("tempscale:%f scale:%f matmulscale:%f\n", tempScale, scale, matMulScale);
+#endif  
+
+  if (C % 16 == 0 && KN % 16 == 0 && tempScale == scale && biScale == matMulScale && outputOffset == 0 && inputOffset == 0 && kernelOffset == 0 && biasOffset == 0) {
+
+        printf("++ fwdVTAConv ++: NHWC:%d,%d,%d,%d pad:%d, stride:%d scale i:%f o:%f f:%f, C:%d KH:%d KW:%d KN:%d relu=%d\n",N,H,W,C,pad_size, stride_size, inputScale,outputScale,kernelScale,C,KH,KW,KN,doRelu);
+
+        llvm::SmallVector<dim_t, 4> inputDims = {N, H, W, C};
+        Type inputType(ElemKind::Int8QTy, inputDims, inputScale, inputOffset);
+        Tensor inV((void *)input, &inputType);
+
+        llvm::SmallVector<dim_t, 4> outputDims = {N, (dim_t)out_h, (dim_t)out_w, KN};
+  Type outputType(ElemKind::Int8QTy, outputDims, outputScale, outputOffset);
+        Tensor outV((void *)output, &outputType);
+
+        llvm::SmallVector<dim_t, 4> kernelDims = {KN, KH, KW, C};
+  Type kernelType(ElemKind::Int8QTy, kernelDims, kernelScale, kernelOffset);
+        Tensor filterV((void *)kernel, &kernelType);
+
+        Tensor *biasV;
+        if (doBias) {
+    llvm::SmallVector<dim_t, 1> biasDims = {KN};
+    Type biasType(ElemKind::Int32QTy, biasDims, biasScale, biasOffset);
+          biasV = new Tensor((void *)bias, &biasType);
+        } else {
+    biasV = new Tensor(ElemKind::Int32QTy, {KN}, 1.0, 0);
+    biasV->zero();
   }
 
-  int32_t outOffset = outputOffset;
-  int32_t inOffset = inputOffset;
-  int32_t filterOffset = kernelOffset;
-  //int32_t biasOffset = biasOffset;
-  if(C%16 ==0 && KN%16 ==0 && tempScale==scale && biasScale==matMulScale && outOffset ==0 && inOffset ==0 && filterOffset ==0 && biasOffset ==0) {
-    fwdVTAConvolutionInstQuantizedImpl(
-            &inV, &outV, &filterV, biasV,
-            kernelSizes, strides,
-            pads, group, dilation, doRelu);
+        std::array<unsigned_t, 2> kernelS = {(unsigned_t)KH, (unsigned_t)KW};
+  llvm::ArrayRef<unsigned_t> kernelSizes(kernelS);
+
+        std::array<unsigned_t, 2> strideS = {(unsigned_t)stride_size,
+                                            (unsigned_t)stride_size};
+  llvm::ArrayRef<unsigned_t> strides(strideS);
+
+        std::array<unsigned_t, 4> padS = {(unsigned_t)pad_size, (unsigned_t)pad_size,
+                                          (unsigned_t)pad_size, (unsigned_t)pad_size};
+
+  llvm::ArrayRef<unsigned_t> pads(padS);
+
+        fwdVTAConvolutionInstQuantizedImpl(&inV, &outV, &filterV, biasV,
+                                       kernelSizes, strides, pads, group,
+                                       dilation, doRelu);
+  }else {
+
+     printf("-- fwdVTAConv --: NHWC:%d,%d,%d,%d pad:%d, stride:%d scale i:%f o:%f b:%f f:%f, C:%d KH:%d KW:%d KN:%d \n",N,H,W,C,pad_size, stride_size, inputScale,outputScale,biasScale, kernelScale,C,KH,KW,KN);
+
+    // convert to nchw
+    int8_t* input_nchw = (int8_t*)malloc(N*H*W*C);
+    int8_t* k_nchw = (int8_t*)malloc(C*KH*KW*KN);
+    int8_t* output_nchw = (int8_t*)malloc(N*out_w*out_h*KN);
+
+      if(C==3 && W%16==0) {
+       nhwc_to_nchw_s8_c3_w16n(input,input_nchw,N,H,W,C);   
+       printf("channel 3 => nhwc_to_nchw_s8_c3\n");
+      } else {
+        nhwc_to_nchw_s8(input,input_nchw,N,H,W,C);   
+        printf("nhwc_to_nchw_s8\n");
+      } 
+
+      //TODO change to neon
+      // kernel nhwc -> nchw
+      for(int kn=0;kn<KN;kn++)
+      {
+        for(int j=0;j<KH;j++)
+        {
+          for(int i=0;i<KW;i++)
+          {
+            for(int c=0;c<C;c++)
+            {
+              k_nchw[kn*KH*KW*C + c*KW*KH + j*KW + i ] = kernel[ kn*KH*KW*C + j*KW*C + i*C + c];
+            }
+          }
+        }
+      }
+#if DEBUG_INFO
+
+
+      printf("NCHW_conv\n");
+      for(int j=0;j<H*C;j+=16)
+      {
+        for(int i=0;i<20;i++) printf("%02x ", input_nchw[i+j*W]) ;
+        printf("\n%d) ",j+16);
+      }
+
+#endif      
+
+
+    fwdConvolution_nchw(input_nchw, k_nchw, bias,output_nchw, 
+                inputScale, kernelScale, biasScale, outputScale, inputOffset, kernelOffset, biasOffset, outputOffset,
+                                       N,C,H,W, KN, KH, KW,  pad_size, stride_size, 1,
+                                       dilation, doRelu, doBias, out_h, out_w);
+
+    //TODO change to neon
+    // output nchw -> nhwc && row-major <-> column-major
+    for(int n=0;n<N;n++)
+    {
+      for(int j=0;j<out_h;j++)
+      {
+        for(int i=0;i<out_w;i++)
+  {
+          for(int kn=0;kn<KN;kn++)
+    {
+
+            output[n*out_w*out_h*KN + i*out_w*KN + j*KN + kn] = output_nchw[ n*out_w*out_h*KN + kn*out_w*out_h + j*out_w + i];
+          }
+        }
+    }
   }
-  else {
-    fwdConvolutionInstQuantizedImpl(
-            &inV, &outV, &filterV, biasV,
-            kernelSizes, strides,
-            pads, group, dilation, doRelu);
+
+  free(input_nchw);
+  free(k_nchw);
+  free(output_nchw);
+
   }
+
   return 0;
 }
 
