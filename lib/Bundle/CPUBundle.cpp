@@ -21,6 +21,314 @@
 using namespace std;
 using namespace glow;
 
+inline void nhwc_to_nchw_s8(
+  const int8_t* const in,  // Input data in NHWC form
+  int8_t* const out,       // Output data in NCHW form
+  const int n_batches,
+  const int n_rows,
+  const int n_cols,
+  const int n_channels
+)
+{
+  // Fill in stride values
+  int in_col_stride = n_channels;
+  int in_row_stride = n_cols * in_col_stride;
+  int in_batch_stride = n_rows * in_row_stride;
+
+  int out_row_stride = n_cols;
+  int out_channel_stride = n_rows * out_row_stride;
+  int out_batch_stride = n_channels * out_channel_stride;
+
+  // Perform the re-ordering
+  // For every batch
+  for (int n = 0; n < n_batches; n++)
+  {
+    const int8_t* const in_batch = in + n*in_batch_stride;
+    int8_t* const out_batch = out + n*out_batch_stride;
+
+    // For every row
+    for (int i = 0; i < n_rows; i++)
+    {
+      const int8_t* const in_i = in_batch + i*in_row_stride;
+      int8_t* const out_i = out_batch + i*out_row_stride;
+
+      // For every column
+      for (int j = 0; j < n_cols; j++)
+      {
+        const int8_t* const in_j = in_i + j*in_col_stride;
+        int8_t* const out_j = out_i + j;
+
+        // For every channel
+        for (int c = 0; c < n_channels; c++)
+        {
+          const int8_t* const in_channel = in_j + c;
+          int8_t* const out_channel = out_j + c*out_channel_stride;
+          *(out_channel) = *(in_channel);
+        }
+      }
+    }
+  }
+}
+// only channel 3. width 16���
+inline void nhwc_to_nchw_s8_c3_w16n(
+  const int8_t* const in,  // Input data in NHWC form
+  int8_t* const out,       // Output data in NCHW form
+  const int n_batches,
+  const int n_rows,
+  const int n_cols,
+  const int n_channels
+)
+{
+  // Fill in stride values
+  int in_col_stride = n_channels;
+  int in_row_stride = n_cols * in_col_stride;
+  int in_batch_stride = n_rows * in_row_stride;
+
+  int out_row_stride = n_cols;
+  int out_channel_stride = n_rows * out_row_stride;
+  int out_batch_stride = n_channels * out_channel_stride;
+
+  // Perform the re-ordering
+  // For every batch
+  for (int n = 0; n < n_batches; n++)
+  {
+    const int8_t* const in_batch = in + n*in_batch_stride;
+    int8_t* const out_batch = out + n*out_batch_stride;
+
+    // For every row
+    for (int i = 0; i < n_rows; i++)
+    {
+      const int8_t* const in_i = in_batch + i*in_row_stride;
+      int8_t* const out_i = out_batch + i*out_row_stride;
+
+      // For every column
+      //assert(n_cols/16)
+      int num8x16 = n_cols/16;
+      int8x16x3_t intlv_rgb;
+      for (int j = 0; j < num8x16; j++)
+      {
+        const int8_t* const in_j = in_i + j*16*in_col_stride;
+        int8_t* const out_j = out_i + j*16;
+
+        intlv_rgb=vld3q_s8(in_j);
+        vst1q_s8(out_j, intlv_rgb.val[0]);
+        vst1q_s8(out_j+out_channel_stride, intlv_rgb.val[1]);
+        vst1q_s8(out_j+out_channel_stride*2, intlv_rgb.val[2]);
+
+
+      }
+    }
+  }
+}
+
+
+
+// 8bit nchw_to_nhwc
+inline void nchw_to_nhwc_s8(
+  const int8_t* const in,
+  int8_t* const out,
+  const int n_batches,
+  const int n_channels,
+  const int n_rows,
+  const int n_cols
+) {
+
+  int in_row_stride =  n_cols;
+  int in_channel_stride = n_rows * in_row_stride;
+  int in_batch_stride = n_channels * in_channel_stride;
+
+  int out_col_stride = n_channels;
+  int out_row_stride = n_cols * out_col_stride;
+  int out_batch_stride = n_rows * out_row_stride;
+
+  // Perform the re-ordering
+  for (int n = 0; n < n_batches; n++)
+  {
+    const int8_t* const in_batch = in + n*in_batch_stride;
+    int8_t* const out_batch = out + n*out_batch_stride;
+
+    for (int i = 0; i < n_rows; i++)
+    {
+      const int8_t* const in_row = in_batch + i*in_row_stride;
+      int8_t* const out_row = out_batch + i*out_row_stride;
+
+      for (int j = 0; j < n_cols; j++)
+      {
+        const int8_t* const in_col = in_row + j;
+        int8_t* const out_col = out_row + j*out_col_stride;
+
+        for (int c = 0; c < n_channels; c++)
+        {
+          const int8_t* const in_channel = in_col + c*in_channel_stride;
+          out_col[c] = *(in_channel);
+        }
+      }
+    }
+  }
+}
+
+/*
+// 8bit nchw_to_nhwc
+inline void nchw_to_nhwc_s8(
+  const int8_t* const in,
+  int8_t* const out,
+  const int n_batches,
+  const int n_channels,
+  const int n_rows,
+  const int n_cols
+)
+{
+
+  int in_row_stride =  n_cols;
+  int in_channel_stride = n_rows * in_row_stride;
+  int in_batch_stride = n_channels * in_channel_stride;
+
+  int out_col_stride = n_channels;
+  int out_row_stride = n_cols * out_col_stride;
+  int out_batch_stride = n_rows * out_row_stride;
+
+  // Perform the re-ordering
+  for (int n = 0; n < n_batches; n++)
+  {
+    const int8_t* const in_batch = in + n*in_batch_stride;
+    int8_t* const out_batch = out + n*out_batch_stride;
+
+    for (int i = 0; i < n_rows; i++)
+    {
+      const int8_t* const in_row = in_batch + i*in_row_stride;
+      int8_t* const out_row = out_batch + i*out_row_stride;
+
+      int j = 0, j_remaining = n_cols;
+
+      //16x16 transpose�� ã������.
+      //�ϴ� uint16���� ��ȯ. 8x8�� ����. �ٽ� uint8�� ��ȯ.
+      for (; j_remaining >= 8; j += 8, j_remaining -= 8)
+      {
+        int c = 0, c_remaining = n_channels;
+        for (; c_remaining >= 8; c += 8, c_remaining -= 8)
+        {
+          // Read 16 channels worth of 16 columns, then zip to produce 16 columns
+          // worth of 16 channels.
+          int8x8_t channel_pixels[8];
+
+          int8_t* in_addr0 = in_row + (c + 0)*in_channel_stride + j; // +=in_channel_stride
+          int8_t* out_addr0 = out_row + (j + 0)*out_col_stride + c; // += out_col_Stride
+
+          asm volatile(
+            "vld1.32 {x0}, [%[in_channel_stride]]!\n"
+            "vld1.32 {x1}, [%[in_addr0]]\n"
+            "vld1.8 {q0}, [x1]!\n"  // 16�� 8bit load
+            "add x1,x1,x0\n"
+            "vshll.8 q4,d0,#8\n"
+            "vshll.8 q5,d1,#8\n"
+            "vld1.8 {q0}, [x1]!\n"  // 16�� 8bit load
+            "add x1,x1,x0\n"
+            "vshll.8 q6,d0,#8\n"
+            "vshll.8 q7,d1,#8\n"
+            "vld1.8 {q0}, [x1]!\n"  // 16�� 8bit load
+            "add x1,x1,x0\n"
+            "vshll.8 q8,d0,#8\n"
+            "vshll.8 q9,d1,#8\n"
+            "vld1.8 {q0}, [x1]!\n"  // 16�� 8bit load
+            "vshll.8 q10,d0,#8\n"
+            "vshll.8 q11,d1,#8\n"
+
+            // swap antidiagnoal elem within 2x2 blocks
+            "vtrn.16 q8,q9\n"
+            "vtrn.16 q10,q11\n"
+            "vtrn.16 q4,q5\n"
+            "vtrn.16 q6,q7\n"
+
+            // swap antidiagnoal 2x2 block within 4x4 blocks
+            "vtrn.32 q8,q10\n"
+            "vtrn.32 q9,q11\n"
+            "vtrn.32 q4,q6\n"
+            "vtrn.32 q5,q7\n"
+
+            // swap antidiagonal 4x4 blocks within 8x8 matrix
+            "vswp d9,d16\n"
+            "vswp d11,d18\n"
+            "vswp d13,d20\n"
+            "vswp d15,d22\n"
+
+            //store
+
+            :
+            // Outputs.
+
+            :
+            // Inputs.
+            [in_channel_stride] "r"(in_channel_stride), [in_addr0] "r"(in_addr0),
+            [out_col_stride] "r"(out_col_stride), [out_addr0] "r"(out_addr0)
+            :
+            // Clobbers.
+            "cc", "memory",
+            // We use these NEON registers
+            "x0", "x1", 
+            "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10",
+            "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19", "v20",
+            "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", "v30",
+            "v31");
+
+          vst1q_s32(out_row + (j + 0)*out_col_stride + c, out_0.val[0]);
+          vst1q_s32(out_row + (j + 1)*out_col_stride + c, out_0.val[1]);
+          vst1q_s32(out_row + (j + 2)*out_col_stride + c, out_1.val[0]);
+          vst1q_s32(out_row + (j + 3)*out_col_stride + c, out_1.val[1]);
+        }
+        for (; c_remaining; c++, c_remaining--)
+        {
+          for (int _j = 0; _j < 4; _j++)
+          {
+            const T* const in_col = in_row + j + _j;
+            T* const out_col = out_row + (j + _j)*out_col_stride;
+            const T* const in_channel = in_col + c*in_channel_stride;
+            out_col[c] = *(in_channel);
+          }
+        }
+      }
+      for (; j_remaining >= 2; j += 2, j_remaining -= 2)
+      {
+        int c = 0, c_remaining = n_channels;
+        for (; c_remaining >= 2; c += 2, c_remaining -= 2)
+        {
+          // Read 2 channels worth of 2 columns, then zip to produce 2 columns
+          // worth of 2 channels.
+          int32x2_t channel_pixels[2];
+          channel_pixels[0] = vld1_s32(in_row + (c + 0)*in_channel_stride + j);
+          channel_pixels[1] = vld1_s32(in_row + (c + 1)*in_channel_stride + j);
+
+          const auto output = vzip_s32(channel_pixels[0], channel_pixels[1]);
+
+          vst1_s32(out_row + (j + 0)*out_col_stride + c, output.val[0]);
+          vst1_s32(out_row + (j + 1)*out_col_stride + c, output.val[1]);
+        }
+        for (; c_remaining; c++, c_remaining--)
+        {
+          for (int _j = 0; _j < 2; _j++)
+          {
+            const T* const in_col = in_row + j + _j;
+            T* const out_col = out_row + (j + _j)*out_col_stride;
+            const T* const in_channel = in_col + c*in_channel_stride;
+            out_col[c] = *(in_channel);
+          }
+        }
+      }
+
+      for (; j_remaining; j++, j_remaining--)
+      {
+        const T* const in_col = in_row + j;
+        T* const out_col = out_row + j*out_col_stride;
+
+        for (int c = 0; c < n_channels; c++)
+        {
+          const T* const in_channel = in_col + c*in_channel_stride;
+          out_col[c] = *(in_channel);
+        }
+      }
+    }
+  }
+}
+*/
 void fwdConvolutionInstFloatImpl(
         Tensor *inV, Tensor *outV, Tensor *filterV, Tensor *biasV,
         llvm::ArrayRef<unsigned_t> kernelSizes, llvm::ArrayRef<unsigned_t> strides,
