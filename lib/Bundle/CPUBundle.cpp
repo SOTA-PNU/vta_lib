@@ -1516,15 +1516,20 @@ void transpose_nhwc2vtaio(int8_t* input, int8_t* output, int N, int H, int W, in
   int8_t *IN_NHWC = input;
 
   int8_t *IN_NCHW = (int8_t *)malloc(N*C*H*W);
+  /*
   for (int n = 0; n < N; n++) {
     for (int h = 0; h < H; h++) {
       for (int w = 0; w < W; w++) {
         for (int c = 0; c < C; c++) {
-          *(IN_NCHW + n*C*H*W + c*H*W + h*W + w)=*(IN_NHWC + n*H*W*C + h*W*C + w*C + c);
+          *(IN_NCHW + n * C * H * W + c * H * W + h * W + w) =
+              *(IN_NHWC + n * H * W * C + h * W * C + w * C + c);
         }
       }
     }
   }
+  */
+ nhwc_to_nchw_s8(input, IN_NCHW, N,H,W,C);
+
 
   // reshape input NCHW -> N{C//16}16HW
   int8_t *in_NC_16HW = IN_NCHW;
