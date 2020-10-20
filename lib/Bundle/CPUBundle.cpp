@@ -863,58 +863,93 @@ int fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t 
 
 
 
-template <class T>
-void fwdMaxPool(Tensor *inW, Tensor *outW,
-                llvm::ArrayRef<unsigned_t> kernelSizes,
-                llvm::ArrayRef<unsigned_t> strides,
-                llvm::ArrayRef<unsigned_t> pads) {
-  ShapeNHWC odim(outW->dims());
-  ShapeNHWC idim(inW->dims());
-  Handle<T> inHandle = inW->getHandle<T>();
-  Handle<T> outHandle = outW->getHandle<T>();
-  PaddingTLBR pdim(pads);
-  ShapeHW kdim(kernelSizes);
-  ShapeHW sdim(strides);
+void maxpool_nxn_nhwc(int8_t *input, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C,
+            unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
+            unsigned_t stride_size) {
+  
+  //TODO padding size
+  
+  // kernel size = nXn
+  // nhwc. channel should be multiple of 16 to use int8x16_t type.
+  if(KH!=KW && pad_size!=1) {
+    printf("!!!!!!!!!! not impl yet\n");
+    return;
+  }
 
-  // For each input in the batch:
-  for (dim_t n = 0; n < odim.n; n++) {
+  int p=(int)pad_size;
+  int out_w = ((W+2*p + 1) - (KW - 1))/stride_size;
+  int out_h = ((H+2*p +1) - (KH - 1))/stride_size;
 
-    // For each layer in the output tensor:
-    for (dim_t z = 0; z < idim.c; z++) {
-      // For each convolution 'jump' in the input tensor:
-      sdim_t x = -sdim_t(pdim.top);
-      for (dim_t ax = 0; ax < odim.h; x += sdim.height, ax++) {
-        sdim_t y = -sdim_t(pdim.left);
-        for (dim_t ay = 0; ay < odim.w; y += sdim.width, ay++) {
+#if DEBUG_INFO  
+  printf("out_w =%d, out_h=%d\n",out_w, out_h);
+#endif  
 
-          bool first = true;
-          T max_value = 0;
-          dim_t argmaxNHWC = 0;
+  for(int n=0;n<N;n++)
+  {
+    for(int c=0;c<C/16;c++) // 16 channel once
+    {
+      for(int h=0,ho=0;h<H+2*p;h+=stride_size,ho++)
+      {
+        for(int w=0,wo=0;w<W+2*p;w+=stride_size,wo++)
+        {
 
-          for (dim_t fx = 0; fx < kdim.height; fx++) {
-            for (dim_t fy = 0; fy < kdim.width; fy++) {
-              sdim_t ox = x + fx;
-              sdim_t oy = y + fy;
+          // assume kernel 3x3
+          // pass if padding. start 0,0 including padding
+          const int pool_start_y = std::max(p, h);
+          const int pool_end_y   = std::min((int)H+p, (int)(h+KH));
+          const int pool_start_x = std::max(p, w);
+          const int pool_end_x   = std::min((int)W+p, (int)(w+KW));
+          
+          int8x16_t vres = vdupq_n_s8(-128);  // min value
+#if DEBUG_INFO
+          printf("--[%d~%d, %d~%d]--\n",pool_start_x,pool_end_x,pool_start_y,pool_end_y);
+#endif
+          // pool start index
+          const int nopad_x=pool_start_x-p;
+          const int nopad_y=pool_start_y-p;
+          int start_idx = n*H*W*C + nopad_y*W*C + nopad_x*C + (c*16); 
 
-              // Ignore index access below zero (this is due to padding).
-              if (ox < 0 || oy < 0 || ox >= ssize_t(idim.h) ||
-                  oy >= ssize_t(idim.w)) {
-                continue;
+          for(int y = 0; y < pool_end_y - pool_start_y; ++y)
+          {
+              for(int x = 0; x < pool_end_x - pool_start_x; ++x)
+              {
+                //load a single vector
+                const int8x16_t data = vld1q_s8(input + start_idx + x*C + y*W*C);
+#if DEBUG_INFO
+                //debug
+                int8_t at[16];
+                vst1q_s8(at, data);
+                printf("[%d,%d]%x(%p) ",x,y,at[0],input + start_idx + x*C + y*W*C);
+#endif
+                // Vr[i] := (Va[i] >= Vb[i]) ? Va[i] : Vb[i]
+                vres = vmaxq_s8(vres, data);
               }
-
-              T val = inHandle.at({n, (dim_t)ox, (dim_t)oy, z});
-              if (first || (val >= max_value)) {
-                first = false;
-                max_value = val;
-              }
-            }
           }
-          outHandle.at({n, ax, ay, z}) = max_value;
 
-        } // W
-      }   // H
-    }     // C
-  }       // N
+          // Store result
+          // TODO check if qinfo matters. in orignal code, true means input , output scale offsets are same
+          // org code -> (input_qinfo != output_qinfo) ? vrequantize_pooling<q8x8_t, q8x16_t>(wrapper::vgetlow(vres), wrapper::vgethigh(vres), requant_qinfo) :
+          int out_idx = n* out_w*out_w*C +ho*out_w*C + wo*C + (c*16);
+          vst1q_s8(output+out_idx,  vres);
+#if DEBUG_INFO
+          //debug
+          int8_t ot[16];
+          vst1q_s8(ot, vres);
+          printf("\n out = %x\n ",ot[0]);
+#endif
+          
+        }
+      }
+    }
+  }
+#if DEBUG_INFO
+  for(int j=0;j<out_w*out_h;j++)
+  {
+    if(j%16==0) printf("\n");
+    printf("%x ", output[j]);
+  }
+#endif  
+
 }
 
 
@@ -922,39 +957,40 @@ void fwdMaxPool(Tensor *inW, Tensor *outW,
 int maxpool(int8_t* input, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
             unsigned_t stride_size){
 
-  std::array<unsigned_t,4> padsS = {pad_size, pad_size, pad_size, pad_size};
-  llvm::ArrayRef<unsigned_t> padShape(padsS);
+  printf("maxpool kh=%d kw=%d pad=%d str=%d DIM=N:%d H:%d W:%d C:%d\n", KH,KW,pad_size,stride_size, N,H,W,C );
 
-  std::array<unsigned_t,2> kernelS = {KH, KW};
-  llvm::ArrayRef<unsigned_t> kernelShape(kernelS);
-
-  std::array<unsigned_t,2> strideS = {stride_size, stride_size};
-  llvm::ArrayRef<unsigned_t> strideShape(strideS);
-
-  llvm::SmallVector<dim_t, 4> inputDims = {N, H, W, C};
-  Type inputType(ElemKind::Int8QTy, inputDims, 1.0, 0);
-  Tensor inputs((void*)input, &inputType);
-
-
-  dim_t OH = (H+2*pad_size-KH)/stride_size + 1;
-  dim_t OW = (W+2*pad_size-KW)/stride_size + 1;
-
-  llvm::SmallVector<dim_t, 4> outputDims = {N, OH, OW, C};
-  Type outputType(ElemKind::Int8QTy, outputDims, 1.0, 0);
-  Tensor outputs((void*)output, &outputType);
-
-  fwdMaxPool<int8_t>(&inputs, &outputs, kernelShape, strideShape, padShape);
+  maxpool_nxn_nhwc(input,output,N,H,W,C,KH,KW,pad_size,stride_size);
   return 0;
 
 }
 
 int relu(int8_t* input, int8_t *output, unsigned_t size, float inputScale, float outputScale){
-  for(int i = 0; i < size; i ++){
-    if(input[i]>0)
-      output[i]=input[i];
-    else
-      output[i]=0;
-    output[i] *= (int)(inputScale/outputScale);
+
+  int int_scale = (int)(inputScale / outputScale);
+  const int8x16_t scale_v = vdupq_n_s8(int_scale);
+  const int8x16_t zero_v = vdupq_n_s8(0);
+  int div16_cnt = size / 16;
+  int offset=0;
+  for (int i = 0; i < div16_cnt ; i++) {
+    const int8x16_t a = vld1q_s8(input+i*16);
+    if(int_scale != 1) vst1q_s8(output+i*16, vmulq_s8(vmaxq_s8(zero_v,a),scale_v));
+    else vst1q_s8(output+i*16, vmaxq_s8(zero_v,a));
+  }
+  if(size%16 >=8)
+  {
+    const int8x8_t a8 = vld1_s8(input+div16_cnt*16);
+    const int8x8_t scale_v8 = vdup_n_s8(int_scale);
+    const int8x8_t zero_v8 = vdup_n_s8(0);
+    if(int_scale != 1) vst1_s8(output+div16_cnt*16, vmul_s8(vmax_s8(zero_v8,a8),scale_v8));
+    else vst1_s8(output+div16_cnt*16, vmax_s8(zero_v8,a8));
+    offset+=8;
+  }
+  int left = size - div16_cnt*16 - offset;
+  for (int i = 0; i < left; i++) {
+    int idx=div16_cnt*16 + offset + i;
+    if (input[idx] > 0) output[idx] = input[idx];
+    else output[idx] = 0;
+    output[idx] *= int_scale;
   }
 
   return 0;
@@ -1021,10 +1057,145 @@ void fwdAvgPoolInstI8Impl(Tensor *inW, Tensor *outW,
 }
 
 
+void avgpool_nxn_nhwc(int8_t *input, float inputScale, int32_t inputOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C,
+           dim_t outputDim0, dim_t outputDim1, dim_t outputDim2, dim_t outputDim3,unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
+            unsigned_t stride_size) {
+  
+  //TODO padding > 1
+
+  // kernel size = nXn
+  // nhwc. channel should be multiple of 16
+  if(KH!=KW && pad_size!=1) {
+    printf("!!!!!!!!!! not impl yet\n");
+    return;
+  }
+
+  const float32x4_t             half_scale_v = vdupq_n_f32(0.5f);
+  int p=(int)pad_size;
+
+  const float scale = 1.0f * (inputScale / outputScale / (KW*KH)); 
+
+#if DEBUG_INFO
+  printf("scale:%f\n",scale);
+#endif  
+
+  for(int n=0;n<N;n++)
+  {
+    for(int c=0;c<C/16;c++) 
+    {
+        for(int h=0,ho=0;h<H+2*p-KH+1;h+=stride_size,ho++) // ho = h out.
+        {
+          for(int w=0,wo=0;w<W+2*p-KW+1;w+=stride_size,wo++)
+          {
+
+
+          const int pool_start_y = std::max(p, h);
+          const int pool_end_y   = std::min((int)H+p, (int)(h+KH));
+          const int pool_start_x = std::max(p, w);
+          const int pool_end_x   = std::min((int)W+p, (int)(w+KW));
+          
+  
+          float32x4_t vres1 = vdupq_n_f32(0.f);
+          float32x4_t vres2 = vdupq_n_f32(0.f);
+          float32x4_t vres3 = vdupq_n_f32(0.f);
+          float32x4_t vres4 = vdupq_n_f32(0.f);
+
+
+
+#if DEBUG_INFO
+          printf("--[%d~%d, %d~%d]--\n",pool_start_x,pool_end_x,pool_start_y,pool_end_y);
+#endif
+          // pool start idx
+          const int nopad_x=pool_start_x-p;
+          const int nopad_y=pool_start_y-p;
+          int start_idx = n*H*W*C + nopad_y*W*C + nopad_x*C + (c*16); 
+
+
+          for(int y = 0; y < pool_end_y - pool_start_y; ++y)
+          {
+              for(int x = 0; x < pool_end_x - pool_start_x; ++x)
+              {
+                //load a single vector
+                const int8x16_t data = vld1q_s8(input + start_idx + x*C + y*W*C);
+
+                const int16x8_t data_s16  = vmovl_s8(vget_low_s8(data));
+                const int16x8_t data2_s16 = vmovl_s8(vget_high_s8(data));
+
+                vres1   = vaddq_f32(vres1, vcvtq_f32_s32(vmovl_s16(vget_low_s16(data_s16))));
+                vres2   = vaddq_f32(vres2, vcvtq_f32_s32(vmovl_s16(vget_high_s16(data_s16))));
+                vres3   = vaddq_f32(vres3, vcvtq_f32_s32(vmovl_s16(vget_low_s16(data2_s16))));
+                vres4   = vaddq_f32(vres4, vcvtq_f32_s32(vmovl_s16(vget_high_s16(data2_s16))));
+    
+#if DEBUG_INFO
+                //debug
+                int8_t at[16];
+                float32_t tt[4];
+                vst1q_f32(tt,vres1);
+                vst1q_s8(at, data);
+                printf("[%d,%d]%x(%f)  ",x,y,at[0],vres1[0]); // %p  ,input + start_idx + x*C + y*W*C);
+#endif
+
+              }
+          }
+
+          //TODO check using vcvtaq or vcvtnq
+          // Store result
+          const float32x4_t scale_v = vdupq_n_f32(scale);
+          // Divide by scale and add 0.5f to round to nearest instead of rounding towards zero
+          vres1 = vmlaq_f32(half_scale_v, vres1, scale_v);
+          vres2 = vmlaq_f32(half_scale_v, vres2, scale_v);
+          vres3 = vmlaq_f32(half_scale_v, vres3, scale_v);
+          vres4 = vmlaq_f32(half_scale_v, vres4, scale_v);
+
+          // vcvtq round towrd zero shows same result with original one
+          const int8x8_t res1 = vqmovn_s16(vcombine_s16(vqmovn_s32(vcvtq_s32_f32(vres1)), vqmovn_s32(vcvtq_s32_f32(vres2))));
+          const int8x8_t res2 = vqmovn_s16(vcombine_s16(vqmovn_s32(vcvtq_s32_f32(vres3)), vqmovn_s32(vcvtq_s32_f32(vres4))));
+          int out_idx = n*((H+2*p)/stride_size)*((W+2*p)/stride_size)*C +ho*((W+2*p)/stride_size)*C + wo*C + (c*16);
+          const int8x16_t vres = vcombine_s8(res1, res2);
+          vst1q_s8(output + out_idx, vres);
+
+ 
+#if DEBUG_INFO
+          //debug
+          float32_t t1[4];
+          vst1q_f32(t1, vres1);
+          int8_t ot[16];
+          vst1q_s8(ot, vres);
+          printf("\n out = %f %d [%d]\n ",t1[0],ot[0],out_compare[out_idx]);
+#endif
+          
+        }
+      }
+    }
+  }
+#if DEBUG_INFO
+  for(int j=0;j<1024;j++)
+  {
+    if(j%16==0) printf("\n");
+    printf("%x ", output[j]);
+  }
+#endif  
+
+  return;
+
+}
+
+
 int avgpool(int8_t* input, float inputScale, int32_t inputOffset, int8_t *output, float outputScale, int32_t outputOffset,
             dim_t inputDim0, dim_t inputDim1, dim_t inputDim2, dim_t inputDim3,
             dim_t outputDim0, dim_t outputDim1, dim_t outputDim2, dim_t outputDim3,
             unsigned_t KH, unsigned_t KW, unsigned_t pad_size, unsigned_t stride_size) {
+
+#if DEBUG_INFO
+printf("is:%f, io%d I(%d,%d,%d,%d) os:%f oo:%d I(%d,%d,%d,%d)  K(%d,%d) pad:%d, st:%d\n",
+ inputScale, inputOffset, inputDim0, inputDim1,  inputDim2,  inputDim3, 
+  outputScale, outputOffset,   
+        outputDim0,  outputDim1, outputDim2, outputDim3,  KH,  KW,  pad_size, stride_size);
+#endif
+    avgpool_nxn_nhwc(input,inputScale, inputOffset, output, outputScale, outputOffset, inputDim0, inputDim1,  inputDim2,  inputDim3,  
+        outputDim0,  outputDim1, outputDim2, outputDim3,  KH,  KW,  pad_size, stride_size);
+		
+/*			
   std::array<unsigned_t,4> padsS = {pad_size, pad_size, pad_size, pad_size};
   llvm::ArrayRef<unsigned_t> padShape(padsS);
 
@@ -1044,6 +1215,7 @@ int avgpool(int8_t* input, float inputScale, int32_t inputOffset, int8_t *output
 
   fwdAvgPoolInstI8Impl(&inputs, &outputs, kernelShape, strideShape, padShape);
   return 0;
+*/  
 }
 
 int quantize(int8_t *input, int8_t *output, dim_t size, float scale, int32_t offset){
