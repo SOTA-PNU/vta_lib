@@ -607,7 +607,7 @@ void vector_matrix_multiply_s8(int8_t *lhs_ptr, int8_t *rhs_ptr, int32_t *accum_
   // check overflow 
   // upscale to s32 if s16 datatype overflow because of filterOffset  
   assert(filterOffset < 32700 );
-  assert(filterOffset > -32700)
+  assert(filterOffset > -32700);
 
   const int16x4_t vfilterOff = vdup_n_s16(filterOffset);
 
