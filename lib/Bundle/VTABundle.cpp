@@ -308,11 +308,8 @@ void conv_kernel(uint32_t sizeOutTileH,
 
   uint32_t nFilterinLoop = KN / nVirtualThread / 16 ;
   nFilterinLoop = min(nFilterinLoop, ACC_MEM_ENTRY/ nVirtualThread / resizedOutTileH / resizedOutTileW);
-  for(uint32_t i = 31; i>=0; i--){
-    if(nFilterinLoop & 0x1 <<i) {
-      nFilterinLoop = 0x1 <<i;
-      break;
-    }
+  for(;nFilterinLoop>0;nFilterinLoop--){
+    if((KN/16) % (nFilterinLoop*nVirtualThread) ==0) break;
   }
 
   for (uint32_t filterIdx = 0; filterIdx < KN / nFilterinLoop / nVirtualThread / 16; filterIdx++) {
