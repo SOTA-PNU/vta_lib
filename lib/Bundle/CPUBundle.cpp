@@ -16,10 +16,203 @@
 #include <arm_neon.h>
 #include "vta/vtalib/include/Bundle/VTABundle.h"
 
+#include <linux/perf_event.h>
+#include <asm/unistd.h>
 #define DEBUG_INFO  0
 
 using namespace std;
 using namespace glow;
+
+
+struct PerfEvent {
+  perf_event_attr pe;
+  int fd = -1;
+
+  PerfEvent(std::uint32_t type, std::uint64_t config) {
+    memset(&pe, 0, sizeof(pe));
+    pe.size = sizeof(pe);
+    pe.type = type;
+    pe.config = config;
+    pe.disabled = 1;
+    pe.exclude_kernel = 1;
+    pe.exclude_hv = 1;
+    fd = syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0);
+    if (fd == -1) {
+      fprintf(stderr, "perf_event_open failed for config 0x%lx\n", config);
+      abort();
+    }
+  }
+
+  void Start() {
+    ioctl(fd, PERF_EVENT_IOC_RESET, 0);
+    ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
+  }
+
+  std::int64_t Stop() {
+    ioctl(fd, PERF_EVENT_IOC_DISABLE, 0);
+    std::int64_t count = 0;
+    read(fd, &count, sizeof(count));
+    return count;
+  }
+
+  ~PerfEvent() { close(fd); }
+};
+
+struct ArmPmuEvent : PerfEvent {
+  static constexpr std::uint16_t L1I_CACHE_REFILL = 0x01;
+  static constexpr std::uint16_t L1I_TLB_REFILL = 0x02;
+  static constexpr std::uint16_t L1D_CACHE_REFILL = 0x03;
+  static constexpr std::uint16_t L1D_CACHE = 0x04;
+  static constexpr std::uint16_t L1D_TLB_REFILL = 0x05;
+  static constexpr std::uint16_t LD_RETIRED = 0x06;
+  static constexpr std::uint16_t ST_RETIRED = 0x07;
+  static constexpr std::uint16_t INST_RETIRED = 0x08;
+  static constexpr std::uint16_t EXC_TAKEN = 0x09;
+  static constexpr std::uint16_t EXC_RETURN = 0x0A;
+  static constexpr std::uint16_t CID_WRITE_RETIRED = 0x0B;
+  static constexpr std::uint16_t PC_WRITE_RETIRED = 0x0C;
+  static constexpr std::uint16_t BR_IMMED_RETIRED = 0x0D;
+  static constexpr std::uint16_t BR_RETURN_RETIRED = 0x0E;
+  static constexpr std::uint16_t UNALIGNED_LDST_RETIRED = 0x0F;
+  static constexpr std::uint16_t BR_MIS_PRED = 0x10;
+  static constexpr std::uint16_t CPU_CYCLES = 0x11;
+  static constexpr std::uint16_t BR_PRED = 0x12;
+  static constexpr std::uint16_t MEM_ACCESS = 0x13;
+  static constexpr std::uint16_t L1I_CACHE = 0x14;
+  static constexpr std::uint16_t L1D_CACHE_WB = 0x15;
+  static constexpr std::uint16_t L2D_CACHE = 0x16;
+  static constexpr std::uint16_t L2D_CACHE_REFILL = 0x17;
+  static constexpr std::uint16_t L2D_CACHE_WB = 0x18;
+  static constexpr std::uint16_t BUS_ACCESS = 0x19;
+  static constexpr std::uint16_t MEMORY_ERROR = 0x1A;
+  static constexpr std::uint16_t INST_SPEC = 0x1B;
+  static constexpr std::uint16_t TTBR_WRITE_RETIRED = 0x1C;
+  static constexpr std::uint16_t BUS_CYCLES = 0x1D;
+  static constexpr std::uint16_t CHAIN = 0x1E;
+  static constexpr std::uint16_t L1D_CACHE_ALLOCATE = 0x1F;
+  static constexpr std::uint16_t L2D_CACHE_ALLOCATE = 0x20;
+  static constexpr std::uint16_t BR_RETIRED = 0x21;
+  static constexpr std::uint16_t BR_MIS_PRED_RETIRED = 0x22;
+  static constexpr std::uint16_t STALL_FRONTEND = 0x23;
+  static constexpr std::uint16_t STALL_BACKEND = 0x24;
+  static constexpr std::uint16_t L1D_TLB = 0x25;
+  static constexpr std::uint16_t L1I_TLB = 0x26;
+  static constexpr std::uint16_t L2I_CACHE = 0x27;
+  static constexpr std::uint16_t L2I_CACHE_REFILL = 0x28;
+  static constexpr std::uint16_t L3D_CACHE_ALLOCATE = 0x29;
+  static constexpr std::uint16_t L3D_CACHE_REFILL = 0x2A;
+  static constexpr std::uint16_t L3D_CACHE = 0x2B;
+  static constexpr std::uint16_t L3D_CACHE_WB = 0x2C;
+  static constexpr std::uint16_t L2D_TLB_REFILL = 0x2D;
+  static constexpr std::uint16_t L2I_TLB_REFILL = 0x2E;
+  static constexpr std::uint16_t L2D_TLB = 0x2F;
+  static constexpr std::uint16_t L2I_TLB = 0x30;
+  static constexpr std::uint16_t LL_CACHE = 0x32;
+  static constexpr std::uint16_t LL_CACHE_MISS = 0x33;
+  static constexpr std::uint16_t DTLB_WALK = 0x34;
+  static constexpr std::uint16_t LL_CACHE_RD = 0x36;
+  static constexpr std::uint16_t LL_CACHE_MISS_RD = 0x37;
+  static constexpr std::uint16_t L1D_CACHE_RD = 0x40;
+  static constexpr std::uint16_t L1D_CACHE_REFILL_RD = 0x42;
+  static constexpr std::uint16_t L1D_TLB_REFILL_RD = 0x4C;
+  static constexpr std::uint16_t L1D_TLB_RD = 0x4E;
+  static constexpr std::uint16_t L2D_CACHE_RD = 0x50;
+  static constexpr std::uint16_t L2D_CACHE_REFILL_RD = 0x52;
+  static constexpr std::uint16_t BUS_ACCESS_RD = 0x60;
+  static constexpr std::uint16_t MEM_ACCESS_RD = 0x66;
+  static constexpr std::uint16_t L3D_CACHE_RD = 0xA0;
+  static constexpr std::uint16_t L3D_CACHE_REFILL_RD = 0xA2;
+  ArmPmuEvent(std::uint16_t number) : PerfEvent(PERF_TYPE_RAW, number) {}
+};
+
+struct CacheCounts {
+  int ld_retired = 0;
+  int mem_access = 0;
+  int ll_cache = 0;
+  int ll_cache_miss = 0;
+  int l1d_tlb = 0;
+  int l1d_tlb_refill = 0;
+  int l1d_cache = 0;
+  int l1d_cache_refill = 0;
+  int l2d_cache = 0;
+  int l2d_cache_refill = 0;
+  int l3d_cache = 0;
+  int l3d_cache_refill = 0;
+};
+
+void PrintCacheCounts(const CacheCounts& cache_counts) {
+  printf("ld_retired = %d\n", cache_counts.ld_retired);
+  printf("mem_access = %d\n", cache_counts.mem_access);
+  printf("ll_cache = %d\n", cache_counts.ll_cache);
+  printf("ll_cache_miss = %d\n", cache_counts.ll_cache_miss);
+  printf("l1d_tlb = %d\n", cache_counts.l1d_tlb);
+  printf("l1d_tlb_refill = %d\n", cache_counts.l1d_tlb_refill);  
+  printf("l1d_cache = %d\n", cache_counts.l1d_cache);
+  printf("l1d_cache_refill = %d\n", cache_counts.l1d_cache_refill);
+  printf("l2d_cache = %d\n", cache_counts.l2d_cache);
+  printf("l2d_cache_refill = %d\n", cache_counts.l2d_cache_refill);
+  printf("l3d_cache = %d\n", cache_counts.l3d_cache);
+  printf("l3d_cache_refill = %d\n", cache_counts.l3d_cache_refill);
+}
+
+const bool only_reads = false;
+ArmPmuEvent ld_retired(ArmPmuEvent::LD_RETIRED);
+ArmPmuEvent mem_access(only_reads ? ArmPmuEvent::MEM_ACCESS_RD
+                                  : ArmPmuEvent::MEM_ACCESS);
+ArmPmuEvent ll_cache(only_reads ? ArmPmuEvent::LL_CACHE_RD
+                                : ArmPmuEvent::LL_CACHE);
+ArmPmuEvent ll_cache_miss(only_reads ? ArmPmuEvent::LL_CACHE_MISS_RD
+                                      : ArmPmuEvent::LL_CACHE_MISS);
+ArmPmuEvent l1d_cache(only_reads ? ArmPmuEvent::L1D_CACHE_RD
+                                  : ArmPmuEvent::L1D_CACHE);
+ArmPmuEvent l1d_cache_refill(only_reads ? ArmPmuEvent::L1D_CACHE_REFILL_RD
+                                        : ArmPmuEvent::L1D_CACHE_REFILL);
+ArmPmuEvent l1d_tlb(only_reads ? ArmPmuEvent::L1D_TLB_RD
+                                  : ArmPmuEvent::L1D_TLB);
+ArmPmuEvent l1d_tlb_refill(only_reads ? ArmPmuEvent::L1D_TLB_REFILL_RD
+                                        : ArmPmuEvent::L1D_TLB_REFILL);                                        
+ArmPmuEvent l2d_cache(only_reads ? ArmPmuEvent::L2D_CACHE_RD
+                                  : ArmPmuEvent::L2D_CACHE);
+ArmPmuEvent l2d_cache_refill(only_reads ? ArmPmuEvent::L2D_CACHE_REFILL_RD
+                                        : ArmPmuEvent::L2D_CACHE_REFILL);
+ArmPmuEvent l3d_cache(only_reads ? ArmPmuEvent::L3D_CACHE_RD
+                                  : ArmPmuEvent::L3D_CACHE);
+ArmPmuEvent l3d_cache_refill(only_reads ? ArmPmuEvent::L3D_CACHE_REFILL_RD
+                                        : ArmPmuEvent::L3D_CACHE_REFILL);
+
+void StartCacheCounts() {
+  
+  ld_retired.Start();
+  mem_access.Start();
+  ll_cache.Start();
+  ll_cache_miss.Start();
+  l1d_cache.Start();
+  l1d_cache_refill.Start();
+  l1d_tlb.Start();
+  l1d_tlb_refill.Start();
+
+  l2d_cache.Start();
+  l2d_cache_refill.Start();
+  l3d_cache.Start();
+  l3d_cache_refill.Start();
+}
+
+void StopCacheCounts(CacheCounts* cache_counts) 
+{
+  cache_counts->ld_retired = ld_retired.Stop();
+  cache_counts->mem_access = mem_access.Stop();
+  cache_counts->ll_cache = ll_cache.Stop();
+  cache_counts->ll_cache_miss = ll_cache_miss.Stop();
+  cache_counts->l1d_cache = l1d_cache.Stop();
+  cache_counts->l1d_cache_refill = l1d_cache_refill.Stop();
+  cache_counts->l1d_tlb = l1d_tlb.Stop();
+  cache_counts->l1d_tlb_refill = l1d_tlb_refill.Stop();  
+  cache_counts->l2d_cache = l2d_cache.Stop();
+  cache_counts->l2d_cache_refill = l2d_cache_refill.Stop();
+  cache_counts->l3d_cache = l3d_cache.Stop();
+  cache_counts->l3d_cache_refill = l3d_cache_refill.Stop();
+}
+
 
 inline void nhwc_to_nchw_s8(
   const int8_t* const in,  // Input data in NHWC form
@@ -1556,12 +1749,17 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
       }
 
 #endif      
+  CacheCounts cache_counts;
+  StartCacheCounts();
 
 
     fwdConvolution_nchw(input_nchw, k_nchw, bias,output_nchw, 
                 inputScale, kernelScale, biasScale, outputScale, inputOffset, kernelOffset, biasOffset, outputOffset,
                                        N,C,H,W, KN, KH, KW,  pad_size, stride_size, 1,
                                        dilation, doRelu, doBias, out_h, out_w);
+
+    StopCacheCounts(&cache_counts);
+PrintCacheCounts(cache_counts);    
 
     //TODO change to neon
     // output nchw -> nhwc && row-major <-> column-major
