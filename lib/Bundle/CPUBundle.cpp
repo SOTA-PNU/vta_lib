@@ -1171,6 +1171,425 @@ void vector_matrix_multiply_s8(int8_t *lhs_ptr, int8_t *rhs_ptr, int32_t *accum_
    
 }
 
+// (16xK)*(K*8n). width_a = K = depth,  width_b =  * elemsize(1). 
+// best performance if K = 16k
+// lhs: row-major, rhs: colomn-major
+void mm_matrix_multiply_s8(int8_t *lhs_ptr, int8_t *rhs_ptr, int32_t *accum_ptr, int width_a, int width_b, size_t stride_b, int32_t filterOffset)
+{
+  
+  // block = 1x16 * 16*8
+  
+  //TODO. temp
+  // check overflow 
+  // upscale to s32 if s16 datatype overflow because of filterOffset  
+  assert(filterOffset < 32700 );
+  assert(filterOffset > -32700);
+
+  const int16x4_t vfilterOff = vdup_n_s16(filterOffset);
+  const int k_row=8;  // 커널 갯수
+  // lhs = (k_row) * 16
+  // rhs = 16*8 (8개 width)
+
+  for (int nblock = 0; nblock < width_b / 8; nblock++)
+  {
+      // 8 width
+      int32x4_t c[k_row][8];
+
+      int8x16_t a_s8[k_row] ;
+      int16x4x4_t a_s16[k_row];
+
+      for(int k =0;k<k_row;k++)
+      for (int o = 0; o < 8; o++)
+          c[k][o] = vdupq_n_s32(0);
+
+      int8_t *a_ptr = lhs_ptr;                         
+      int8_t *b_ptr = rhs_ptr + nblock * 8 * stride_b; 
+      auto vec_a_end_addr = a_ptr + width_a;
+
+      if( vec_a_end_addr - a_ptr >= 16)
+      {
+        // This for loop performs 8 accumulations
+        // cell layout: 1x16 * 16*8 = 1x8
+        for (; a_ptr <= (vec_a_end_addr - 16);)
+        {
+
+            
+          /*  const int8x16_t a40_s8 = vld1q_s8(a_ptr + 4* width_a);
+            const int8x16_t a50_s8 = vld1q_s8(a_ptr + 5* width_a);
+            const int8x16_t a60_s8 = vld1q_s8(a_ptr + 6* width_a);
+            const int8x16_t a70_s8 = vld1q_s8(a_ptr + 7* width_a);            
+*/
+            const int8x16_t b00_s8 = vld1q_s8(b_ptr + 0 * stride_b);
+            const int8x16_t b10_s8 = vld1q_s8(b_ptr + 1 * stride_b);
+            const int8x16_t b20_s8 = vld1q_s8(b_ptr + 2 * stride_b);
+            const int8x16_t b30_s8 = vld1q_s8(b_ptr + 3 * stride_b);
+            const int8x16_t b40_s8 = vld1q_s8(b_ptr + 4 * stride_b);
+            const int8x16_t b50_s8 = vld1q_s8(b_ptr + 5 * stride_b);
+            const int8x16_t b60_s8 = vld1q_s8(b_ptr + 6 * stride_b);
+            const int8x16_t b70_s8 = vld1q_s8(b_ptr + 7 * stride_b);
+
+            const int16x4x4_t b00_s16 =
+                {
+                    {vget_low_s16(vmovl_s8(vget_low_s8(b00_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b00_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b00_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b00_s8)))}};
+
+            const int16x4x4_t b10_s16 =
+                {
+                    {vget_low_s16(vmovl_s8(vget_low_s8(b10_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b10_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b10_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b10_s8)))}};
+
+            const int16x4x4_t b20_s16 =
+                {
+                    {vget_low_s16(vmovl_s8(vget_low_s8(b20_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b20_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b20_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b20_s8)))}};
+
+            const int16x4x4_t b30_s16 =
+                {
+                    {vget_low_s16(vmovl_s8(vget_low_s8(b30_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b30_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b30_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b30_s8)))}};
+
+            const int16x4x4_t b40_s16 =
+                {
+                    {vget_low_s16(vmovl_s8(vget_low_s8(b40_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b40_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b40_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b40_s8)))}};
+
+            const int16x4x4_t b50_s16 =
+                {
+                    {vget_low_s16(vmovl_s8(vget_low_s8(b50_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b50_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b50_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b50_s8)))}};
+
+            const int16x4x4_t b60_s16 =
+                {
+                    {vget_low_s16(vmovl_s8(vget_low_s8(b60_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b60_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b60_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b60_s8)))}};
+
+            const int16x4x4_t b70_s16 =
+                {
+                    {vget_low_s16(vmovl_s8(vget_low_s8(b70_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b70_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b70_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b70_s8)))}};
+
+            for(int k=0;k<k_row;k++)
+            {
+                 a_s8[k] = vld1q_s8(a_ptr + k * width_a);
+                a_s16[k] =
+                {
+                    {vsub_s16(vget_low_s16(vmovl_s8(vget_low_s8(a_s8[k]))), vfilterOff),
+                    vsub_s16(vget_high_s16(vmovl_s8(vget_low_s8(a_s8[k]))), vfilterOff),
+                    vsub_s16(vget_low_s16(vmovl_s8(vget_high_s8(a_s8[k]))), vfilterOff),
+                    vsub_s16(vget_high_s16(vmovl_s8(vget_high_s8(a_s8[k]))), vfilterOff)}};
+
+              // Accumulate 0:
+              c[k][0] = vmlal_s16(c[k][0], b00_s16.val[0], a_s16[k].val[0]);
+              c[k][0] = vmlal_s16(c[k][0], b00_s16.val[1], a_s16[k].val[1]);
+              c[k][0] = vmlal_s16(c[k][0], b00_s16.val[2], a_s16[k].val[2]);
+              c[k][0] = vmlal_s16(c[k][0], b00_s16.val[3], a_s16[k].val[3]);
+
+              // Accumulate 1:
+              c[k][1] = vmlal_s16(c[k][1], b10_s16.val[0], a_s16[k].val[0]);
+              c[k][1] = vmlal_s16(c[k][1], b10_s16.val[1], a_s16[k].val[1]);
+              c[k][1] = vmlal_s16(c[k][1], b10_s16.val[2], a_s16[k].val[2]);
+              c[k][1] = vmlal_s16(c[k][1], b10_s16.val[3], a_s16[k].val[3]);
+
+              // Accumulate 2:
+              c[k][2] = vmlal_s16(c[k][2], b20_s16.val[0], a_s16[k].val[0]);
+              c[k][2] = vmlal_s16(c[k][2], b20_s16.val[1], a_s16[k].val[1]);
+              c[k][2] = vmlal_s16(c[k][2], b20_s16.val[2], a_s16[k].val[2]);
+              c[k][2] = vmlal_s16(c[k][2], b20_s16.val[3], a_s16[k].val[3]);
+
+              // Accumulate 3:
+              c[k][3] = vmlal_s16(c[k][3], b30_s16.val[0], a_s16[k].val[0]);
+              c[k][3] = vmlal_s16(c[k][3], b30_s16.val[1], a_s16[k].val[1]);
+              c[k][3] = vmlal_s16(c[k][3], b30_s16.val[2], a_s16[k].val[2]);
+              c[k][3] = vmlal_s16(c[k][3], b30_s16.val[3], a_s16[k].val[3]);
+
+              // Accumulate 4:
+              c[k][4] = vmlal_s16(c[k][4], b40_s16.val[0], a_s16[k].val[0]);
+              c[k][4] = vmlal_s16(c[k][4], b40_s16.val[1], a_s16[k].val[1]);
+              c[k][4] = vmlal_s16(c[k][4], b40_s16.val[2], a_s16[k].val[2]);
+              c[k][4] = vmlal_s16(c[k][4], b40_s16.val[3], a_s16[k].val[3]);
+
+              // Accumulate 5:
+              c[k][5] = vmlal_s16(c[k][5], b50_s16.val[0], a_s16[k].val[0]);
+              c[k][5] = vmlal_s16(c[k][5], b50_s16.val[1], a_s16[k].val[1]);
+              c[k][5] = vmlal_s16(c[k][5], b50_s16.val[2], a_s16[k].val[2]);
+              c[k][5] = vmlal_s16(c[k][5], b50_s16.val[3], a_s16[k].val[3]);
+
+              // Accumulate 6:
+              c[k][6] = vmlal_s16(c[k][6], b60_s16.val[0], a_s16[k].val[0]);
+              c[k][6] = vmlal_s16(c[k][6], b60_s16.val[1], a_s16[k].val[1]);
+              c[k][6] = vmlal_s16(c[k][6], b60_s16.val[2], a_s16[k].val[2]);
+              c[k][6] = vmlal_s16(c[k][6], b60_s16.val[3], a_s16[k].val[3]);
+
+              // Accumulate 7:
+              c[k][7] = vmlal_s16(c[k][7], b70_s16.val[0], a_s16[k].val[0]);
+              c[k][7] = vmlal_s16(c[k][7], b70_s16.val[1], a_s16[k].val[1]);
+              c[k][7] = vmlal_s16(c[k][7], b70_s16.val[2], a_s16[k].val[2]);
+              c[k][7] = vmlal_s16(c[k][7], b70_s16.val[3], a_s16[k].val[3]);
+            }
+
+            a_ptr += 16;
+            b_ptr += 16;
+
+#if DEBUG_INFO
+  if(nblock==0) {
+    
+    int32_t sum_temp[4];
+    vst1q_s32(sum_temp, c0[k][0]);
+
+    printf("step:%d - ", a_ptr - lhs_ptr);
+    for(int k=0;k<4;k++)
+    { 
+      printf(" %d ", sum_temp[k]); 
+    }
+    printf("\n");
+
+  }
+#endif    
+
+        }
+      }
+
+      // This for loop performs the left-over accumulations
+      // left elem is less than 16
+      {
+         
+
+          //const int8x16_t a00_s8 = vld1q_s8(a_ptr);
+          const int8x16_t b00_s8 = vld1q_s8(b_ptr + 0 * stride_b);
+          const int8x16_t b10_s8 = vld1q_s8(b_ptr + 1 * stride_b);
+          const int8x16_t b20_s8 = vld1q_s8(b_ptr + 2 * stride_b);
+          const int8x16_t b30_s8 = vld1q_s8(b_ptr + 3 * stride_b);
+          const int8x16_t b40_s8 = vld1q_s8(b_ptr + 4 * stride_b);
+          const int8x16_t b50_s8 = vld1q_s8(b_ptr + 5 * stride_b);
+          const int8x16_t b60_s8 = vld1q_s8(b_ptr + 6 * stride_b);
+          const int8x16_t b70_s8 = vld1q_s8(b_ptr + 7 * stride_b);
+
+
+          const int16x4x4_t b00_s16 =
+              {
+                  {vget_low_s16(vmovl_s8(vget_low_s8(b00_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b00_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b00_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b00_s8)))}};
+
+          const int16x4x4_t b10_s16 =
+              {
+                  {vget_low_s16(vmovl_s8(vget_low_s8(b10_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b10_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b10_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b10_s8)))}};
+
+          const int16x4x4_t b20_s16 =
+              {
+                  {vget_low_s16(vmovl_s8(vget_low_s8(b20_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b20_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b20_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b20_s8)))}};
+
+          const int16x4x4_t b30_s16 =
+              {
+                  {vget_low_s16(vmovl_s8(vget_low_s8(b30_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b30_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b30_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b30_s8)))}};
+
+          const int16x4x4_t b40_s16 =
+              {
+                  {vget_low_s16(vmovl_s8(vget_low_s8(b40_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b40_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b40_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b40_s8)))}};
+
+          const int16x4x4_t b50_s16 =
+              {
+                  {vget_low_s16(vmovl_s8(vget_low_s8(b50_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b50_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b50_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b50_s8)))}};
+
+          const int16x4x4_t b60_s16 =
+              {
+                  {vget_low_s16(vmovl_s8(vget_low_s8(b60_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b60_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b60_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b60_s8)))}};
+
+          const int16x4x4_t b70_s16 =
+              {
+                  {vget_low_s16(vmovl_s8(vget_low_s8(b70_s8))),
+                    vget_high_s16(vmovl_s8(vget_low_s8(b70_s8))),
+                    vget_low_s16(vmovl_s8(vget_high_s8(b70_s8))),
+                    vget_high_s16(vmovl_s8(vget_high_s8(b70_s8)))}};
+
+          // Convert a00_s8 to int16_t and get the lower part
+            // Convert a00_s8 to int16_t and get the lower part
+            for(int k=0;k<k_row;k++)
+            {
+                a_s8[k] = vld1q_s8(a_ptr + k * width_a);
+                a_s16[k] =
+                {
+                    {vsub_s16(vget_low_s16(vmovl_s8(vget_low_s8(a_s8[k]))), vfilterOff),
+                    vsub_s16(vget_high_s16(vmovl_s8(vget_low_s8(a_s8[k]))), vfilterOff),
+                    vsub_s16(vget_low_s16(vmovl_s8(vget_high_s8(a_s8[k]))), vfilterOff),
+                    vsub_s16(vget_high_s16(vmovl_s8(vget_high_s8(a_s8[k]))), vfilterOff)}};
+
+            }
+
+            int ii = 0; // index 
+            if(vec_a_end_addr - a_ptr  >= 8) {
+         
+              for(int k=0;k<k_row;k++)
+              {
+                   // Accumulate 0:
+                c[k][0] = vmlal_s16(c[k][0], b00_s16.val[0+ii], a_s16[k].val[0+ii]);
+                c[k][0] = vmlal_s16(c[k][0], b00_s16.val[1+ii], a_s16[k].val[1+ii]);
+
+                // Accumulate 1:
+                c[k][1] = vmlal_s16(c[k][1], b10_s16.val[0+ii], a_s16[k].val[0+ii]);
+                c[k][1] = vmlal_s16(c[k][1], b10_s16.val[1+ii], a_s16[k].val[1+ii]);
+
+                // Accumulate 2:
+                c[k][2] = vmlal_s16(c[k][2], b20_s16.val[0+ii], a_s16[k].val[0+ii]);
+                c[k][2] = vmlal_s16(c[k][2], b20_s16.val[1+ii], a_s16[k].val[1+ii]);
+
+                // Accumulate 3:
+                c[k][3] = vmlal_s16(c[k][3], b30_s16.val[0+ii], a_s16[k].val[0+ii]);
+                c[k][3] = vmlal_s16(c[k][3], b30_s16.val[1+ii], a_s16[k].val[1+ii]);
+
+                // Accumulate 4:
+                c[k][4] = vmlal_s16(c[k][4], b40_s16.val[0+ii], a_s16[k].val[0+ii]);
+                c[k][4] = vmlal_s16(c[k][4], b40_s16.val[1+ii], a_s16[k].val[1+ii]);
+
+                // Accumulate 5:
+                c[k][5] = vmlal_s16(c[k][5], b50_s16.val[0+ii], a_s16[k].val[0+ii]);
+                c[k][5] = vmlal_s16(c[k][5], b50_s16.val[1+ii], a_s16[k].val[1+ii]);
+
+                // Accumulate 6:
+                c[k][6] = vmlal_s16(c[k][6], b60_s16.val[0+ii], a_s16[k].val[0+ii]);
+                c[k][6] = vmlal_s16(c[k][6], b60_s16.val[1+ii], a_s16[k].val[1+ii]);
+
+                // Accumulate 7:
+                c[k][7] = vmlal_s16(c[k][7], b70_s16.val[0+ii], a_s16[k].val[0+ii]);
+                c[k][7] = vmlal_s16(c[k][7], b70_s16.val[1+ii], a_s16[k].val[1+ii]);
+              }
+                a_ptr+=8;
+                ii+= (8/4);
+              
+            }
+
+
+            if(vec_a_end_addr - a_ptr >= 4) {
+                      for(int k=0;k<k_row;k++)
+              {
+              // Accumulate 0:
+              c[k][0] = vmlal_s16(c[k][0], b00_s16.val[0+ii], a_s16[k].val[0+ii]);
+
+              // Accumulate 1:
+              c[k][1] = vmlal_s16(c[k][1], b10_s16.val[0+ii], a_s16[k].val[0+ii]);
+
+              // Accumulate 2:
+              c[k][2] = vmlal_s16(c[k][2], b20_s16.val[0+ii], a_s16[k].val[0+ii]);
+
+              // Accumulate 3:
+              c[k][3] = vmlal_s16(c[k][3], b30_s16.val[0+ii], a_s16[k].val[0+ii]);
+
+              // Accumulate 4:
+              c[k][4] = vmlal_s16(c[k][4], b40_s16.val[0+ii], a_s16[k].val[0+ii]);
+
+              // Accumulate 5:
+              c[k][5] = vmlal_s16(c[k][5], b50_s16.val[0+ii], a_s16[k].val[0+ii]);
+
+              // Accumulate 6:
+              c[k][6] = vmlal_s16(c[k][6], b60_s16.val[0+ii], a_s16[k].val[0+ii]);
+
+              // Accumulate 7:
+              c[k][7] = vmlal_s16(c[k][7], b70_s16.val[0+ii], a_s16[k].val[0+ii]);
+              }
+
+              a_ptr+=4;
+              ii+= (4/4);
+            }
+
+          int left = vec_a_end_addr - a_ptr;
+          if(left > 0 )
+          {
+            int16_t l1_mask[4] = { 1 , 0 ,0 ,0};
+            int16_t l2_mask[4] = { 1 , 1 ,0 ,0};
+            int16_t l3_mask[4] = { 1 , 1 ,1 ,0};
+            int16x4_t left_mask;
+            
+            if(left==1) left_mask = vld1_s16(l1_mask);
+            else if(left==2) left_mask = vld1_s16(l2_mask);
+            else left_mask = vld1_s16(l3_mask);
+        for(int k=0;k<k_row;k++)
+              {
+            // Accumulate 0:
+            c[k][0] = vmlal_s16(c[k][0], b00_s16.val[0+ii], vmul_s16(left_mask, a_s16[k].val[0+ii]));
+
+            // Accumulate 1:
+            c[k][1] = vmlal_s16(c[k][1], b10_s16.val[0+ii], vmul_s16(left_mask, a_s16[k].val[0+ii]));
+
+            // Accumulate 2:
+            c[k][2] = vmlal_s16(c[k][2], b20_s16.val[0+ii], vmul_s16(left_mask, a_s16[k].val[0+ii]));
+
+            // Accumulate 3:
+            c[k][3] = vmlal_s16(c[k][3], b30_s16.val[0+ii], vmul_s16(left_mask, a_s16[k].val[0+ii]));
+
+            // Accumulate 4:
+            c[k][4] = vmlal_s16(c[k][4], b40_s16.val[0+ii], vmul_s16(left_mask, a_s16[k].val[0+ii]));
+
+            // Accumulate 5:
+            c[k][5] = vmlal_s16(c[k][5], b50_s16.val[0+ii], vmul_s16(left_mask, a_s16[k].val[0+ii]));
+
+            // Accumulate 6:
+            c[k][6] = vmlal_s16(c[k][6], b60_s16.val[0+ii], vmul_s16(left_mask, a_s16[k].val[0+ii]));
+
+            // Accumulate 7:
+            c[k][7] = vmlal_s16(c[k][7], b70_s16.val[0+ii], vmul_s16(left_mask, a_s16[k].val[0+ii]));
+
+              }
+            a_ptr += left;
+          }
+          // b_ptr += stride_b;
+      }
+
+
+      for (int k = 0; k < k_row; k++)
+      {
+
+        for (int o = 0; o < 8; o++)
+        {
+            int32x2_t temp = vadd_s32(vget_high_s32(c[k][o]), vget_low_s32(c[k][o]));
+            int32x2_t temp2 = vpadd_s32(temp, temp);
+            int32_t sum1 = vget_lane_s32(temp2, 0);
+
+            //vst1q_s32(accum_ptr + nblock * 8 + k, c0[k]);
+            accum_ptr[k*width_b + nblock * 8  + o] = sum1;
+      
+        }
+      }
+  }
+
+   
+}
+
+
 // add bias offset for output, scaling and clip from s32 to s8.
 // out = (int8)((input * matscale) + bias * vscale)
 // ! bias is type int32_t. bias are same for a channel(row)
