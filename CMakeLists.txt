@@ -44,7 +44,7 @@ else()
             -DVTA_STORE_OUT_ADDR_OFFSET=16
             -DVTA_COHERENT_ACCESSES=true
             -Dvta_EXPORTS)
-    add_compile_options(-std=c++14 -faligned-new -O0 -g -Wall -fPIC  -fPIC  -Wno-psabi)
+    add_compile_options(-std=c++14 -faligned-new -O3 -Wall -fPIC -static -fopenmp -Wno-psabi)
     INCLUDE_DIRECTORIES(include include/zcu102)
     #link_libraries(prebuilt_lib)
     add_library(vta_runtime lib/zcu102/api.cc lib/zcu102/pynq_driver.cc)
@@ -53,7 +53,7 @@ endif()
 
 add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle.cpp)
 target_link_libraries(VTABundle PUBLIC
-        vta_runtime LLVMSupport pthread glog gflags)
+        vta_runtime LLVMSupport pthread glog gflags gomp)
 
 if(NOT HAVE_QUANTIZATIONBASE_LIB)
     target_link_libraries(VTABundle PUBLIC
