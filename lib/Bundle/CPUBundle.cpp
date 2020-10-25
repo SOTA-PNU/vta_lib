@@ -14,6 +14,7 @@
 #include "glow/Quantization/Base/Base.h"
 
 #include <arm_neon.h>
+#include <omp.h>
 #include "vta/vtalib/include/Bundle/VTABundle.h"
 
 #include <linux/perf_event.h>
@@ -785,6 +786,140 @@ void fwdVTAConvolutionInstQuantizedImpl(
       }     // C
     }       // G
   }         // N
+}
+
+// (16xK)*(K*8n). width_a = K = depth,  width_b =  * elemsize(1). 
+// best performance if K = 16k
+// lhs: row-major, rhs: colomn-major
+// 4*(KW*KH) x (KW*KH)*(out_w*out_h)
+void mm_matrix_multiply_s8_v2(int8_t *lhs_ptr, int8_t *rhs_ptr, int32_t *accum_ptr, int width_a, int width_b, size_t stride_b, size_t stride_c, int32_t filterOffset)
+{
+  
+  // block = 1x16 * 16*8
+  
+  //TODO. temp
+  // check overflow 
+  // upscale to s32 if s16 datatype overflow because of filterOffset  
+  assert(filterOffset < 32700 );
+  assert(filterOffset > -32700);
+
+  const int16x4_t vfilterOff = vdup_n_s16(filterOffset);
+
+
+
+
+
+  for (int nblock = 0; nblock < width_b / 4; nblock++)
+  {
+   
+      int8_t *a_ptr = lhs_ptr;                         
+      int8_t *b_ptr = rhs_ptr + nblock * 4 * stride_b; 
+
+      int left = width_a % 16;
+
+    int32x4_t acc[4][4];
+    for (int i = 0; i < 4; i++)
+    {
+        for (int j = 0; j < 4; j++)
+        {
+            acc[i][j] = vdupq_n_s32(0);
+        }
+    }
+    // 16개 단위만 먼저 처리
+    for (int d = 0; d < width_a - left ; d += 16)
+    {
+        int8x16_t lhs[4];
+        for (int i = 0; i < 4; i++)
+        {
+            lhs[i] = vld1q_s8(a_ptr + width_a * i);
+        }
+        int8x16_t rhs[4];
+        for (int i = 0; i < 4; i++)
+        {
+            rhs[i] = vld1q_s8(b_ptr + stride_b * i);
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            for (int j = 0; j < 4; j++)
+            {
+                int16x8_t local_acc =
+                    vmull_s8(vget_low_s8(lhs[i]), vget_low_s8(rhs[j]));
+                local_acc =
+                    vmlal_s8(local_acc, vget_high_s8(lhs[i]), vget_high_s8(rhs[j]));
+                acc[i][j] = vpadalq_s16(acc[i][j], local_acc);
+            }
+        }
+        a_ptr += 16;  
+        b_ptr += 16;
+    }
+
+    // 16보다 작은거 처리
+    {
+        int8x16_t lhs[4];
+        for (int i = 0; i < 4; i++)
+        {
+            lhs[i] = vld1q_s8(a_ptr + width_a * i);
+        }
+        int8x16_t rhs[4];
+        for (int i = 0; i < 4; i++)
+        {
+            rhs[i] = vld1q_s8(b_ptr + stride_b * i);
+        }
+
+        int idx=0;
+        if(left >= 8) {
+          for (int i = 0; i < 4; i++)
+          {
+              for (int j = 0; j < 4; j++)
+              {
+                  int16x8_t local_acc =
+                      vmull_s8(vget_low_s8(lhs[i]), vget_low_s8(rhs[j]));
+                  //local_acc =
+                  //    vmlal_s8(local_acc, vget_high_s8(lhs[i]), vget_high_s8(rhs[j]));
+                  acc[i][j] = vpadalq_s16(acc[i][j], local_acc);
+              }
+          }
+          left -= 8;
+          idx+=8;
+        }
+
+        if(left>=4) {
+          for (int i = 0; i < 4; i++)
+          {
+              for (int j = 0; j < 4; j++)
+              {
+                int16x8_t local_acc;
+                if(idx==0) {
+                            local_acc =
+                            vmull_s8(vget_low_s8(lhs[i]), vget_low_s8(rhs[j]));
+                }
+                else if(idx==8) {          
+                        local_acc =
+                            vmull_s8(vget_high_s8(lhs[i]), vget_high_s8(rhs[j]));
+                }
+
+                  acc[i][j] = vaddq_s32(acc[i][j], vmovl_s16(vget_low_s16(local_acc)));
+              }
+          }
+
+          idx+=4;
+          left-=4;
+        }
+
+    }
+    
+    for (int i = 0; i < 4; i++)
+    {
+        int32x4_t acc_2x_0 = vpaddq_s32(acc[0][i], acc[1][i]);
+        int32x4_t acc_2x_1 = vpaddq_s32(acc[2][i], acc[3][i]);
+        int32x4_t acc_4x = vpaddq_s32(acc_2x_0, acc_2x_1);
+        int32x4_t dst_val = vld1q_s32(accum_ptr + 4 * i);
+        dst_val = vaddq_s32(dst_val, acc_4x);
+        vst1q_s32(accum_ptr +  nblock * 4 + stride_c * i, dst_val);
+    }
+
+  } // n_block  
+   
 }
 
 
@@ -4474,6 +4609,311 @@ static void int8kernel(void* dst, const int8_t* sa, const int8_t* sb, int m, int
     return;
 }
 
+
+// input nchw, output nchw
+void fwdConvolution_nchw_mm(int8_t *input, int8_t *kernel, int8_t *bias, int8_t *output, 
+                      float inS, float kS, float bS, float outS,
+                      int32_t inOffset, int32_t filterOffset, int32_t biasOffset, int32_t outOffset,
+                      dim_t N, dim_t C, dim_t H, dim_t W, dim_t KN, dim_t KH, dim_t KW, int pad_size, int stride_size, size_t group,
+                      size_t dilation, bool doRelu, bool doBias, 
+                      int out_h, int out_w) {
+
+  // only support KN%4
+  assert(KN%4 ==0);
+  assert((out_w*out_w)%16==0);
+
+  
+  float outScale = outS;
+  float inScale = inS;
+  float filterScale = kS;
+  float biasScale = bS;
+
+  // Calculate the scale of the values that come out of the matrix
+  // multiplication part of the calculation.
+    float matMulScale = inScale * filterScale;
+    float scale = matMulScale / outScale;
+    float bscale = biasScale / matMulScale;  
+
+
+//#if DEBUG_INFO
+#if 1
+  printf("off i:%d f:%d b:%d o:%d\n",inOffset,  filterOffset,  biasOffset,  outOffset);
+
+  printf("\nscale:%f\n", scale);
+  printf("bscale:%f\n",bscale);
+#endif
+
+
+  int8_t* flat_input = (int8_t*)malloc (KH*KW*C* out_h * out_w); // c= channel
+//  int8_t* kernel_vec = (int8_t*)malloc (KH*KW*C); // 1 filter * channel
+  int32_t* mm_out_c = (int32_t*)malloc(C*KN*out_w*out_h*sizeof(int32_t)); // 채널별로 나눠서 저장 후 나중에 합침.
+  
+  
+  
+  // make patched input
+  // For each convolution 'jump' in the input tensor:
+  clock_t t1s = clock();
+  
+  
+
+ 
+/*
+   ssize_t x = -ssize_t(pad_size);
+   for (dim_t ax = 0; ax < out_h; ax++, x += stride_size) {  //H
+    ssize_t y = -ssize_t(pad_size);
+    for (dim_t ay = 0; ay < out_w; y += stride_size, ay++) { 
+       linearize_volume_nchw(input, flat_input + (ax * KH * KW * out_w * C) + (ay * KH * KW * C), x, y, KW, KH, KN, W, H, 1, W, W * H, pad_size > 0 ? 1 : 0, 0, 1, 1, inOffset);
+    
+#if 1
+      if(ax<4 && ay <4) 
+      {
+        for(int c=0;c<3;c++)
+        {
+        printf("\n(%d,%d - %d)[%d,%d]\n",x,y,c,KW,KH);
+        //ch0�� ���. 
+        for(int k=0;k<KW*KH;k++) { printf("%02x ",flat_input[k + (ax * KH * KW * out_w * C) + (ay * KH * KW * C)+ c*KH*KW]); if(k%7==6) printf("/ "); }
+
+        }
+      }
+#endif      
+      
+    }
+  }
+
+  const int stride = KH * KW * out_w * out_h;
+  signed char* ret = (signed char*)flat_input;
+  #pragma omp parallel for num_threads(4)
+  for (int p = 0; p < C; p++)
+  {
+      const signed char* in = input + H*W*p;  // p channel
+      int retID = stride * p;
+      for (int u = 0; u < KH; u++)
+      {
+          for (int v = 0; v < KW; v++)
+          {
+              for (int i = 0; i < out_h; i++)
+              {
+                  for (int j = 0; j < out_w; j++)
+                  {
+                      int row = u + i * stride_size - pad_size;    
+                      int col = v + j * stride_size - pad_size;
+                      if(row<0 || col<0 || row >= H || col >= W) ret[retID]=0;
+                      else {
+                        int index = row * W + col;
+                        ret[retID] = input[index];
+
+                      }
+                      retID++;
+                  }
+              }
+          }
+      }
+  }
+*/
+
+  const int stride_in_c = W*H;
+  const int stride_out_c = KH * KW * out_w * out_h;
+  signed char* ret = (signed char*)flat_input;
+ 
+  #pragma omp parallel for num_threads(3)
+  for (int p = 0; p < C; p++)
+  {
+    int8_t *in = input + stride_in_c * p;
+    int retID = stride_out_c * p;
+  for (int i = 0; i < out_h; i++)
+  {
+    for (int j = 0; j < out_w; j++)
+    {      
+
+        for (int u = 0; u < KH; u++)
+            {
+                for (int v = 0; v < KW; v++)
+                {            
+                      int row = u + i * stride_size - pad_size;    
+                      int col = v + j * stride_size - pad_size;
+                      if(row<0 || col<0 || row >= H || col >= W) ret[retID]=0;
+                      else {
+                        int index = row * W + col;
+                        ret[retID] = in[index];
+                      }
+                      retID++;
+                  }
+              }
+          }
+      }
+  }
+
+
+#if 0
+// 위에는 kchw인데 col-major 로 되어있음
+for(int ay=0, x=-pad_size;ay<4;ay++,x+=stride_size) {
+  for(int ax=0, y=-pad_size;ax<4;ax++,y+=stride_size) {
+        for(int c=0;c<3;c++)
+        {
+       printf("\ncc(%d,%d - %d)[%d,%d]\n",x,y,c,KW,KH);
+        //ch0�� ���. 
+        for(int k=0;k<KW*KH;k++) { printf("%02x ",flat_input[k + (ax * KH * KW) + (ay * KH * KW * out_w)+ c*KH*KW*out_w*out_h]); if(k%7==6) printf("/ "); }
+        }
+
+  }
+
+}
+
+
+#endif   
+
+  clock_t t1e = clock();
+  cout <<"linearize: : "<<(double)(t1e- t1s)/CLOCKS_PER_SEC*1000 << std::endl;
+
+  const int m = KN;
+    const int n = out_w * out_h;
+    const int k = C * KW * KH;
+
+
+  if(filterOffset!=0) printf("!!!!! check filterOffset");
+  clock_t t2s = clock();
+/*
+    // GEMM
+    int32_t* pc = mm_out_c;
+    const int8_t* pa = kernel;
+    int8_t* pb = flat_input;
+    const size_t ldc = out_w*out_h; //top_blob.cstep;
+
+    
+    int8kernel((void*)pc, pa, pb, m, k, n, ldc, 0, 0);
+
+  #pragma omp parallel for num_threads(4)
+  for (dim_t d = 0; d < KN; d++) {
+      vector_scale_bias_offset_clip_s8(mm_out_c + d*out_w*out_h, *((int32_t*)bias+d), output  + (d*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+  }
+
+*/
+
+  // For each output channel in the group:
+  // row=4
+
+  #pragma omp parallel for num_threads(4)
+  for(int c=0;c<C;c++) {
+    for (dim_t d = 0; d < KN; d+=4) { 
+       
+      mm_matrix_multiply_s8_v2(kernel + KH * KW * d + c*KH*KW*KN, flat_input + c*out_w*out_h*KW*KH, (int32_t *)mm_out_c + c*out_w*out_h, KH * KW, out_h * out_w, KH * KW, out_w, filterOffset);
+      //mm_matrix_multiply_s8(kernel + KH * KW * d + c*KH*KW*KN, flat_input + c*out_w*out_h*KW*KH, (int32_t *)mm_out_c + c*out_w*out_h, KH * KW, out_h * out_w, KH * KW, filterOffset);
+      //vector_scale_bias_offset_clip_s8(mm_out_c + d *out_w*out_h, *((int32_t*)bias+d), output  + (d*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+      //vector_scale_bias_offset_clip_s8(mm_out_c + (d+1)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+1)*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+      //vector_scale_bias_offset_clip_s8(mm_out_c + (d+2)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+2)*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+      //vector_scale_bias_offset_clip_s8(mm_out_c + (d+3)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+3)*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+  
+    }
+    
+/*
+  #pragma omp parallel for num_threads(3)
+  for(int c=0;c<C;c++) {
+    for (dim_t d = 0; d < KN; d++) { //8=k_row
+       
+      mm_matrix_multiply_s8(kernel + KH * KW * d + c*KH*KW*KN, flat_input + c*out_w*out_h*KW*KH, (int32_t *)mm_out_c + c*out_w*out_h, KH * KW, out_h * out_w, KH * KW, filterOffset);
+      //vector_scale_bias_offset_clip_s8(mm_out_c + d *out_w*out_h, *((int32_t*)bias+d), output  + (d*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+      //vector_scale_bias_offset_clip_s8(mm_out_c + (d+1)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+1)*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+      //vector_scale_bias_offset_clip_s8(mm_out_c + (d+2)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+2)*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+      //vector_scale_bias_offset_clip_s8(mm_out_c + (d+3)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+3)*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+  
+    }    
+*/
+
+
+#if DEBUG_INFO
+      printf("kernel %d\n",d);
+      for(int c=0;c<C;c++)
+      {
+        for (int j = 0; j < KH; j++)
+        {
+          for (int i = 0; i < KW; i++)
+            {
+                printf("%x ",kernel_vec[i + j * KW + c*KH*KW]);
+            }
+          printf(" / ");
+        }
+        printf("\n");
+      }
+#endif        
+
+  }
+
+  int32_t *inp_c[C];
+  for (int c = 0; c < C; c++)
+  {
+    inp_c[c] = mm_out_c + c*out_w*out_h;
+  }
+  
+  #pragma omp parallel for num_threads(4)
+  for (int i = 0; i < out_h; i++)
+  {
+    for (int j = 0; j < out_w; j++)
+    {      
+        *inp_c[0] = *inp_c[0]+*inp_c[1]+*inp_c[2];
+        inp_c[0]++;
+        inp_c[1]++;
+        inp_c[2]++;
+    }
+  }
+
+  #pragma omp parallel for num_threads(4)
+  for(int c=0;c<C;c++) {
+    for (dim_t d = 0; d < KN; d++) { 
+       
+      vector_scale_bias_offset_clip_s8(mm_out_c + d *out_w*out_h, *((int32_t*)bias+d), output  + (d*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+      //vector_scale_bias_offset_clip_s8(mm_out_c + (d+1)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+1)*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+      //vector_scale_bias_offset_clip_s8(mm_out_c + (d+2)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+2)*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+      //vector_scale_bias_offset_clip_s8(mm_out_c + (d+3)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+3)*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
+  
+    }
+  }
+    
+
+  clock_t t2e = clock();
+  cout <<"nn + sc: : "<<(double)(t2e- t2s)/CLOCKS_PER_SEC*1000 << std::endl;
+    
+      
+      
+#if DEBUG_INFO
+    if(d<KN) 
+    {
+        
+        for (int j = 0; j < 2; j++)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                printf("%d ",mm_out_temp[i + j * out_w]+ *((int32_t*)bias+d));
+
+            }
+            printf("\n");
+        }
+        
+    }
+#endif
+
+
+
+#if DEBUG_INFO
+    if(d<KN) 
+    {
+        
+        for (int j = 0; j < 2; j++)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                printf("(%d)",*(output  + (d*out_h*out_w) + i + j * out_w) );
+                if(i % 16 == 15) printf(" / ");
+            }
+            printf("\n");
+        }
+        
+    }
+#endif    
+
+
+  
+}
+
 void fwdConvolutionInstQuantizedImpl(
         Tensor *inV, Tensor *outV, Tensor *filterV, Tensor *biasV,
         llvm::ArrayRef<unsigned_t> kernelSizes, llvm::ArrayRef<unsigned_t> strides,
@@ -4691,12 +5131,22 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
   CacheCounts cache_counts;
   StartCacheCounts();
 
+    if(KN%4==0) { // && out_w*out_hKH*KW*C%16==0
+      printf("MM PATH");
+      fwdConvolution_nchw_mm(input_nchw, k_nchw, bias,output_nchw, 
+                inputScale, kernelScale, biasScale, outputScale, inputOffset, kernelOffset, biasOffset, outputOffset,
+                                       N,C,H,W, KN, KH, KW,  pad_size, stride_size, 1,
+                                       dilation, doRelu, doBias, out_h, out_w);
 
+    }
+    else {
+      printf("VEC PATH");
     fwdConvolution_nchw(input_nchw, k_nchw, bias,output_nchw, 
                 inputScale, kernelScale, biasScale, outputScale, inputOffset, kernelOffset, biasOffset, outputOffset,
                                        N,C,H,W, KN, KH, KW,  pad_size, stride_size, 1,
                                        dilation, doRelu, doBias, out_h, out_w);
 
+    }
     StopCacheCounts(&cache_counts);
 PrintCacheCounts(cache_counts);    
 
