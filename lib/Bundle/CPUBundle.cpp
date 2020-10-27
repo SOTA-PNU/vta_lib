@@ -127,6 +127,7 @@ struct ArmPmuEvent : PerfEvent {
 };
 
 struct CacheCounts {
+  int st_retired = 0;
   int ld_retired = 0;
   int mem_access = 0;
   int ll_cache = 0;
@@ -142,6 +143,7 @@ struct CacheCounts {
 };
 
 void PrintCacheCounts(const CacheCounts& cache_counts) {
+ printf("st_retired = %d\n", cache_counts.st_retired);  
   printf("ld_retired = %d\n", cache_counts.ld_retired);
   printf("mem_access = %d\n", cache_counts.mem_access);
   printf("ll_cache = %d\n", cache_counts.ll_cache);
@@ -157,6 +159,7 @@ void PrintCacheCounts(const CacheCounts& cache_counts) {
 }
 
 const bool only_reads = false;
+ArmPmuEvent st_retired(ArmPmuEvent::ST_RETIRED);
 ArmPmuEvent ld_retired(ArmPmuEvent::LD_RETIRED);
 ArmPmuEvent mem_access(only_reads ? ArmPmuEvent::MEM_ACCESS_RD
                                   : ArmPmuEvent::MEM_ACCESS);
@@ -182,7 +185,7 @@ ArmPmuEvent l3d_cache_refill(only_reads ? ArmPmuEvent::L3D_CACHE_REFILL_RD
                                         : ArmPmuEvent::L3D_CACHE_REFILL);
 
 void StartCacheCounts() {
-  
+  st_retired.Start();
   ld_retired.Start();
   mem_access.Start();
   ll_cache.Start();
@@ -200,6 +203,7 @@ void StartCacheCounts() {
 
 void StopCacheCounts(CacheCounts* cache_counts) 
 {
+  cache_counts->st_retired = st_retired.Stop();
   cache_counts->ld_retired = ld_retired.Stop();
   cache_counts->mem_access = mem_access.Stop();
   cache_counts->ll_cache = ll_cache.Stop();
