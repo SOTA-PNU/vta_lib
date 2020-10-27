@@ -5132,9 +5132,7 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
       }
 
 #endif      
-  CacheCounts cache_counts;
-  StartCacheCounts();
-
+/* temporary disabled. mm version not complete
     if(KN%4==0) { // && out_w*out_hKH*KW*C%16==0
       printf("MM PATH");
       fwdConvolution_nchw_mm(input_nchw, k_nchw, bias,output_nchw, 
@@ -5144,15 +5142,15 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
 
     }
     else {
+*//      
       printf("VEC PATH");
     fwdConvolution_nchw(input_nchw, k_nchw, bias,output_nchw, 
                 inputScale, kernelScale, biasScale, outputScale, inputOffset, kernelOffset, biasOffset, outputOffset,
                                        N,C,H,W, KN, KH, KW,  pad_size, stride_size, 1,
                                        dilation, doRelu, doBias, out_h, out_w);
 
-    }
-    StopCacheCounts(&cache_counts);
-PrintCacheCounts(cache_counts);    
+//    }
+
 
     //TODO change to neon
     // output nchw -> nhwc && row-major <-> column-major
