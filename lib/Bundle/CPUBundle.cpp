@@ -5252,7 +5252,7 @@ int fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t 
   if(inputDim0 == 1 )
   {
       int8_t* K = (int8_t*)malloc( inputDim1 * kernelDim1);
-      int32_t* C = (int32_t*)malloc(kernelDim1);
+      int32_t* C = (int32_t*)malloc(kernelDim1 * sizeof(int32_t));
       
       //TODO neon
       // conv row to  column-major
@@ -5275,6 +5275,9 @@ int fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t 
       }
        printf("\n\n (0,0) b0:%d C0:%d out0:%d",bias[0], C[0],output[0]);
 #endif       
+
+    free(K);
+    free(C);
 
   }
 
