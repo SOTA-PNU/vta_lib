@@ -5142,7 +5142,7 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
 
     }
     else {
-*//      
+*/
       printf("VEC PATH");
     fwdConvolution_nchw(input_nchw, k_nchw, bias,output_nchw, 
                 inputScale, kernelScale, biasScale, outputScale, inputOffset, kernelOffset, biasOffset, outputOffset,
