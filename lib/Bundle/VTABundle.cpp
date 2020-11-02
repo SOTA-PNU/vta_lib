@@ -1,8 +1,4 @@
-#include <iostream>
-#include <ctime>
-#include <cstring>
 #include <cstdint>
-#include <fstream>
 #include <vector>
 
 #include <fcntl.h>
@@ -10,8 +6,6 @@
 #include <sys/ioctl.h>
 #include <cassert>
 #include "llvm/ADT/ArrayRef.h"
-#include "glow/Base/Tensor.h"
-#include "glow/Quantization/Base/Base.h"
 
 #if(GLOW_WITH_VTASIM)
 #include "vta/vtalib/include/simulator/runtime.h"
@@ -23,7 +17,6 @@
 #define RESET_IOCTL _IOWR('X', 101, unsigned long)
 
 using namespace std;
-using namespace glow;
 
 #define MIN_W_SIZE 7
 #define MIN_H_SIZE 7
@@ -665,7 +658,7 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
         for (int w = 0; w < W; w++) {
           for (int c = 0; c < 16; c++) {
             *(in_NC_HW16 + n*(C/16)*H*W*16 + c_*H*W*16 + h*W*16 + w*16 + c) =
-                    *(in_NC_16HW + n*(C/16)*16*H*W + c_*16*H*W + c*H*W + h*W + w);
+                *(in_NC_16HW + n*(C/16)*16*H*W + c_*16*H*W + c*H*W + h*W + w);
           }
         }
       }
@@ -689,7 +682,7 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
           for (int n = 0; n < 16; n++) {
             for (int c = 0; c < 16; c++) {
               *(filter_N_C_HW1616 + n_*(C/16)*KH*KW*16*16 + c_ *KH*KW*16*16 + h*KW*16*16 + w*16*16 + n*16 + c) =
-                      *(filter_N_16HWC_16 + n_*16*KH*KW*C + n*KH*KW*C + h*KW*C + w*C + c_*16 + c);
+                  *(filter_N_16HWC_16 + n_*16*KH*KW*C + n*KH*KW*C + h*KW*C + w*C + c_*16 + c);
             }
           }
         }
@@ -1000,7 +993,7 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
 }
 
 int convolution_wo_tr_wo_ch(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
-                      int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w) {
+                            int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w) {
 
   int tileWSize = 14;
   int tileHSize = 14;
@@ -1237,7 +1230,7 @@ int convolution_wo_tr_wo_ch(int8_t* input, int8_t *kernel, int32_t *bias, int8_t
 }
 
 int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
-                       int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, void* vtaCmdH, int nVirtualThread, int tileHSize, int tileWSize) {
+                      int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, void* vtaCmdH, int nVirtualThread, int tileHSize, int tileWSize) {
 
   int8_t *in_NC_HW16 = input;
   int8_t *filter_N_C_HW1616 = kernel;

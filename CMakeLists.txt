@@ -44,38 +44,50 @@ else()
             -DVTA_STORE_OUT_ADDR_OFFSET=16
             -DVTA_COHERENT_ACCESSES=true
             -Dvta_EXPORTS)
-    add_compile_options(-std=c++14 -faligned-new -O3 -Wall -fPIC -static -fopenmp -Wno-psabi)
+    if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+        add_compile_options(-std=c++14 -faligned-new -O0 -g -Wall -fPIC  -fPIC  -Wno-psabi)
+    else()
+        add_compile_options(-std=c++14 -faligned-new -O3 -Wall -fPIC  -fPIC  -Wno-psabi)
+    endif()
     INCLUDE_DIRECTORIES(include include/zcu102)
     #link_libraries(prebuilt_lib)
     add_library(vta_runtime lib/zcu102/api.cc lib/zcu102/pynq_driver.cc)
     add_subdirectory(tests/zcu102)
 endif()
-
-add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle.cpp)
-target_link_libraries(VTABundle PUBLIC
-        vta_runtime LLVMSupport pthread glog gflags gomp)
-
-if(NOT HAVE_QUANTIZATIONBASE_LIB)
-    target_link_libraries(VTABundle PUBLIC
-        QuantizationBase)
+if(NESTC_VTA_RUN_ON_AARCH64)
+    add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle_aarch64.cpp)
 else()
-    target_link_libraries(VTABundle PUBLIC
-            ${HAVE_QUANTIZATIONBASE_LIB})
-    message(STATUS "Using Prebuilt QuantizationBase")
-endif()
-
-
-if(NOT HAVE_SUPPORT_LIB)
-    target_link_libraries(VTABundle PUBLIC
-            Support)
-else()
-    target_link_libraries(VTABundle PUBLIC
-            ${HAVE_SUPPORT_LIB})
-    message(STATUS "Using Prebuilt Support")
+    add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle_x86.cpp)
 endif()
 
 target_link_libraries(VTABundle PUBLIC
-        Base)
+        vta_runtime LLVMSupport pthread glog gflags)
+
+if(NOT NESTC_VTA_RUN_ON_AARCH64)
+
+
+    if(NOT HAVE_QUANTIZATIONBASE_LIB)
+        target_link_libraries(VTABundle PUBLIC
+                QuantizationBase)
+    else()
+        target_link_libraries(VTABundle PUBLIC
+                ${HAVE_QUANTIZATIONBASE_LIB})
+        message(STATUS "Using Prebuilt QuantizationBase")
+    endif()
+
+
+    if(NOT HAVE_SUPPORT_LIB)
+        target_link_libraries(VTABundle PUBLIC
+                Support)
+    else()
+        target_link_libraries(VTABundle PUBLIC
+                ${HAVE_SUPPORT_LIB})
+        message(STATUS "Using Prebuilt Support")
+    endif()
+
+    target_link_libraries(VTABundle PUBLIC
+            Base)
+endif()
 
 if(NOT GLOW_WITH_VTASIM)
     target_link_libraries(VTABundle PUBLIC cma)
