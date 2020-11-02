@@ -2009,7 +2009,7 @@ void fwdConvolution_nchw(int8_t *input, int8_t *kernel, int8_t *bias, int8_t *ou
   for (dim_t ax = 0; ax < out_h; x += stride_size, ax++) {  //H
     ssize_t y = -ssize_t(pad_size);
     for (dim_t ay = 0; ay < out_w; y += stride_size, ay++) { 
-       linearize_volume_nchw(input, flat_input + (ax * KH * KW * out_w * C) + (ay * KH * KW * C), x, y, KW, KH, KN, W, H, 1, W, W * H, pad_size > 0 ? 1 : 0, 0, 1, 1, inOffset);
+       linearize_volume_nchw(input, flat_input + (ax * KH * KW * out_w * C) + (ay * KH * KW * C), x, y, KW, KH, C, W, H, 1, W, W * H, pad_size > 0 ? 1 : 0, 0, 1, 1, inOffset);
     
 #if DEBUG_INFO     
       if(ax>4 && ay <4) 
@@ -5308,9 +5308,9 @@ void maxpool_nxn_nhwc(int8_t *input, int8_t *output, dim_t N, dim_t H, dim_t W, 
   {
     for(int c=0;c<C/16;c++) // 16 channel once
     {
-      for(int h=0,ho=0;h<H+2*p;h+=stride_size,ho++)
+      for(int h=0,ho=0;ho < out_h;h+=stride_size,ho++)
       {
-        for(int w=0,wo=0;w<W+2*p;w+=stride_size,wo++)
+        for(int w=0,wo=0;wo< out_w ;w+=stride_size,wo++)
         {
 
           // assume kernel 3x3
@@ -5492,6 +5492,8 @@ void avgpool_nxn_nhwc(int8_t *input, float inputScale, int32_t inputOffset, int8
 
   const float32x4_t             half_scale_v = vdupq_n_f32(0.5f);
   int p=(int)pad_size;
+  int out_w = ((W+2*p + 1) - (KW - 1))/stride_size;
+  int out_h = ((H+2*p +1) - (KH - 1))/stride_size;
 
   const float scale = 1.0f * (inputScale / outputScale / (KW*KH)); 
 
@@ -5503,9 +5505,9 @@ void avgpool_nxn_nhwc(int8_t *input, float inputScale, int32_t inputOffset, int8
   {
     for(int c=0;c<C/16;c++) 
     {
-        for(int h=0,ho=0;h<H+2*p-KH+1;h+=stride_size,ho++) // ho = h out.
+        for(int h=0,ho=0;ho<out_h;h+=stride_size,ho++) // ho = h out.
         {
-          for(int w=0,wo=0;w<W+2*p-KW+1;w+=stride_size,wo++)
+          for(int w=0,wo=0;wo<out_w;w+=stride_size,wo++)
           {
 
 
