@@ -2088,6 +2088,9 @@ void fwdConvolution_nchw(int8_t *input, int8_t *kernel, int8_t *bias, int8_t *ou
 #endif    
 
   }
+  free(flat_input);
+  free(kernel_vec);
+  free(mm_out_temp);
 
  
   
@@ -2394,6 +2397,9 @@ for(int ay=0, x=-pad_size;ay<4;ay++,x+=stride_size) {
     }
 #endif    
 
+  free( flat_input );
+//
+  free( mm_out_c);
 
   
 }
@@ -2956,7 +2962,7 @@ void avgpool_nxn_nhwc(int8_t *input, float inputScale, int32_t inputOffset, int8
           // vcvtq round towrd zero shows same result with original one
           const int8x8_t res1 = vqmovn_s16(vcombine_s16(vqmovn_s32(vcvtq_s32_f32(vres1)), vqmovn_s32(vcvtq_s32_f32(vres2))));
           const int8x8_t res2 = vqmovn_s16(vcombine_s16(vqmovn_s32(vcvtq_s32_f32(vres3)), vqmovn_s32(vcvtq_s32_f32(vres4))));
-          int out_idx = n*((H+2*p)/stride_size)*((W+2*p)/stride_size)*C +ho*((W+2*p)/stride_size)*C + wo*C + (c*16);
+          int out_idx = n*(out_h*out_w)*C +ho*(out_w)*C + wo*C + (c*16);
           const int8x16_t vres = vcombine_s8(res1, res2);
           vst1q_s8(output + out_idx, vres);
 
