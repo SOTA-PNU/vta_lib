@@ -11,6 +11,9 @@
 #include <cassert>
 #include "llvm/ADT/ArrayRef.h"
 
+#include <pthread.h>
+#include <sched.h>
+
 #include <arm_neon.h>
 #include <omp.h>
 #include "vta/vtalib/include/Bundle/VTABundle.h"
@@ -586,6 +589,164 @@ int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output
                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
   assert(0=="Disabled");
   return 0;
+}
+
+
+// not all row
+void mm_matrix_multiply_s8_v3(int8_t *lhs_ptr, int8_t *rhs_ptr,
+                              int32_t *accum_ptr, int width_a, int col_b,
+                              size_t stride_b, size_t stride_c,
+                              int32_t filterOffset) {
+
+  // block = 1x16 * 16*8
+
+  // TODO. temp
+  // check overflow
+  // upscale to s32 if s16 datatype overflow because of filterOffset
+  assert(filterOffset < 32700);
+  assert(filterOffset > -32700);
+
+  const int16x4_t vfilterOff = vdup_n_s16(filterOffset);
+
+    int8_t *a_ptr = lhs_ptr;
+  int8_t *b_ptr = rhs_ptr + col_b * stride_b;
+
+    int left = width_a % 16;
+
+    int32x4_t acc[4][4];
+  for (int i = 0; i < 4; i++) {
+    for (int j = 0; j < 4; j++) {
+        acc[i][j] = vdupq_n_s32(0);
+      }
+    }
+    // 16개 단위만 먼저 처리
+  for (int d = 0; d < width_a - left; d += 16) {
+      int8x16_t lhs[4];
+    for (int i = 0; i < 4; i++) {
+        lhs[i] = vld1q_s8(a_ptr + width_a * i);
+      }
+      int8x16_t rhs[4];
+    for (int i = 0; i < 4; i++) {
+        rhs[i] = vld1q_s8(b_ptr + stride_b * i);
+      }
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < 4; j++) {
+          int16x8_t local_acc =
+              vmull_s8(vget_low_s8(lhs[i]), vget_low_s8(rhs[j]));
+          local_acc =
+              vmlal_s8(local_acc, vget_high_s8(lhs[i]), vget_high_s8(rhs[j]));
+          acc[i][j] = vpadalq_s16(acc[i][j], local_acc);
+        }
+      }
+      a_ptr += 16;
+      b_ptr += 16;
+    }
+
+    // 16보다 작은거 처리
+    {
+      int8x16_t lhs[4];
+      for (int i = 0; i < 4; i++)
+      {
+        lhs[i] = vld1q_s8(a_ptr + width_a * i);
+      }
+      int8x16_t rhs[4];
+      for (int i = 0; i < 4; i++)
+      {
+        rhs[i] = vld1q_s8(b_ptr + stride_b * i);
+      }
+
+      int idx=0;
+      if(left >= 8) {
+        for (int i = 0; i < 4; i++)
+        {
+          for (int j = 0; j < 4; j++)
+          {
+            int16x8_t local_acc =
+                vmull_s8(vget_low_s8(lhs[i]), vget_low_s8(rhs[j]));
+                    //local_acc = vmlal_s8(local_acc, vget_high_s8(lhs[i]),  vget_high_s8(rhs[j])); 
+            acc[i][j] = vpadalq_s16(acc[i][j], local_acc);
+          }
+        }
+        left -= 8;
+        idx+=8;
+      }
+
+      if(left>=4) {
+        for (int i = 0; i < 4; i++)
+        {
+          for (int j = 0; j < 4; j++)
+          {
+            int16x8_t local_acc;
+            if(idx==0) {
+                              local_acc =vmull_s8(vget_low_s8(lhs[i]),   vget_low_s8(rhs[j]));
+            }
+            else if(idx==8) {
+                          local_acc =   vmull_s8(vget_high_s8(lhs[i]),  vget_high_s8(rhs[j]));
+            }
+            acc[i][j] = vaddq_s32(acc[i][j], vmovl_s16(vget_low_s16(local_acc)));
+          }
+        }
+
+        idx+=4;
+        left-=4;
+      }
+
+
+          if(left>0) {
+
+               // printf("4x%d => a:%p(+%d), b:%p(+%d)\n", left,a_ptr, a_ptr -   lhs_ptr, b_ptr, b_ptr - rhs_ptr); 
+    for (int i = 0; i < 4; i++)
+    {
+                  for (int j = 0; j < 4; j++)
+                  {
+                    int32x4_t local_acc;
+                    if (idx == 0)
+                    {
+                        local_acc =
+                            vmull_s16(vget_low_s16(vmovl_s8(vget_low_s8(lhs[i]))),     vget_low_s16(vmovl_s8(vget_low_s8(rhs[j]))));
+                    }
+                    else if (idx == 8)
+                    {
+                        local_acc =
+                            vmull_s16(vget_low_s16(vmovl_s8(vget_high_s8(lhs[i]))),     vget_low_s16(vmovl_s8(vget_high_s8(rhs[j]))));
+                    }
+                    else if (idx == 12)
+                    {
+                        local_acc =
+                            vmull_s16(vget_high_s16(vmovl_s8(vget_high_s8(lhs[i]))),     vget_high_s16(vmovl_s8(vget_high_s8(rhs[j]))));
+                    }
+
+                    if(left==1) {
+                      local_acc = vsetq_lane_s32(0, local_acc,1);
+                      local_acc = vsetq_lane_s32(0, local_acc,2);
+                      local_acc = vsetq_lane_s32(0, local_acc,3);
+                    }
+                    else if(left==2) {
+                      local_acc = vsetq_lane_s32(0, local_acc,2);
+                      local_acc = vsetq_lane_s32(0, local_acc,3);
+                    }
+                    else if(left==3) {
+                      local_acc = vsetq_lane_s32(0, local_acc,3);
+                    }
+
+                    acc[i][j] = vaddq_s32(acc[i][j], local_acc);
+                  }
+              }
+          }
+
+
+      }
+  
+
+  for (int i = 0; i < 4; i++) {
+      int32x4_t acc_2x_0 = vpaddq_s32(acc[0][i], acc[1][i]);
+      int32x4_t acc_2x_1 = vpaddq_s32(acc[2][i], acc[3][i]);
+      int32x4_t acc_4x = vpaddq_s32(acc_2x_0, acc_2x_1);
+    // int32x4_t dst_val = vld1q_s32(accum_ptr + 4 * i);
+    // dst_val = vaddq_s32(dst_val, acc_4x);
+    // vst1q_s32(accum_ptr +  nblock * 4 + stride_c * i, dst_val);
+    vst1q_s32(accum_ptr + col_b + stride_c * i, acc_4x);
+  }
 }
 
 
@@ -2200,6 +2361,554 @@ for(int ay=0, x=-pad_size;ay<4;ay++,x+=stride_size) {
 
 
 }
+
+
+#define DEBUG_CORE_PERF_MON
+// input nchw, output nchw
+// im2col + conv
+void fwdConvolution_nchw_mm_v2(
+    int8_t *input, int8_t *kernel, int8_t *bias, int8_t *output, float inS,
+    float kS, float bS, float outS, int32_t inOffset, int32_t filterOffset,
+    int32_t biasOffset, int32_t outOffset, dim_t N, dim_t C, dim_t H, dim_t W,
+    dim_t KN, dim_t KH, dim_t KW, int pad_size, int stride_size, size_t group,
+    size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
+
+  // only support KN%4
+  assert(KN % 4 == 0);
+  assert((out_w * out_w) % 16 == 0);
+
+  float outScale = outS;
+  float inScale = inS;
+  float filterScale = kS;
+  float biasScale = bS;
+
+  // Calculate the scale of the values that come out of the matrix
+  // multiplication part of the calculation.
+  float matMulScale = inScale * filterScale;
+  float scale = matMulScale / outScale;
+  float bscale = biasScale / matMulScale;
+
+//#if DEBUG_INFO
+#if 1
+  printf("off i:%d f:%d b:%d o:%d\n", inOffset, filterOffset, biasOffset,
+         outOffset);
+
+  printf("\nscale:%f\n", scale);
+  printf("bscale:%f\n", bscale);
+#endif
+
+  int8_t *flat_input =
+      (int8_t *)malloc(KH * KW * C * out_h * out_w); // c= channel
+  //  int8_t* kernel_vec = (int8_t*)malloc (KH*KW*C); // 1 filter * channel
+  int32_t *mm_out_c = (int32_t *)malloc(
+      C * KN * out_w * out_h *
+      sizeof(int32_t)); // 채널별로 나눠서 저장 후 나중에 합침.
+
+  CacheCounts cache_counts[3];
+  CacheCounts cache_counts2;
+
+  // make patched input
+  // For each convolution 'jump' in the input tensor:
+  clock_t t1s = clock();
+
+  clock_t t2s;
+
+  int num = sysconf(_SC_NPROCESSORS_CONF);
+  printf("core num:%d ---\n", num);
+
+  // im2col
+  const int stride_in_c = W * H;
+  const int stride_out_c = KH * KW * out_w * out_h;
+  signed char *ret = (signed char *)flat_input;
+
+  omp_set_num_threads(4);
+  //#pragma omp declare simd
+  int32_t *output_ptr[3] = {mm_out_c, mm_out_c + out_h * out_w,
+                            mm_out_c + 2 * out_h * out_w};
+
+  cpu_set_t mask;
+  CPU_ZERO(&mask);
+  CPU_SET(1, &mask);
+
+//#pragma omp parallel
+  {
+//#pragma omp for
+#pragma omp parallel for num_threads(4)
+    for (int c = 0; c < C; c++) {
+#ifdef DEBUG_CORE_PERF_MON
+      ArmPmuEvent st_retired(ArmPmuEvent::ST_RETIRED);
+      ArmPmuEvent ld_retired(ArmPmuEvent::LD_RETIRED);
+      ArmPmuEvent mem_access(only_reads ? ArmPmuEvent::MEM_ACCESS_RD
+                                        : ArmPmuEvent::MEM_ACCESS);
+      ArmPmuEvent ll_cache(only_reads ? ArmPmuEvent::LL_CACHE_RD
+                                      : ArmPmuEvent::LL_CACHE);
+      ArmPmuEvent ll_cache_miss(only_reads ? ArmPmuEvent::LL_CACHE_MISS_RD
+                                           : ArmPmuEvent::LL_CACHE_MISS);
+      ArmPmuEvent l1d_cache(only_reads ? ArmPmuEvent::L1D_CACHE_RD
+                                       : ArmPmuEvent::L1D_CACHE);
+      ArmPmuEvent l1d_cache_refill(only_reads ? ArmPmuEvent::L1D_CACHE_REFILL_RD
+                                              : ArmPmuEvent::L1D_CACHE_REFILL);
+      ArmPmuEvent l1d_tlb(only_reads ? ArmPmuEvent::L1D_TLB_RD
+                                     : ArmPmuEvent::L1D_TLB);
+      ArmPmuEvent l1d_tlb_refill(only_reads ? ArmPmuEvent::L1D_TLB_REFILL_RD
+                                            : ArmPmuEvent::L1D_TLB_REFILL);
+      ArmPmuEvent l2d_cache(only_reads ? ArmPmuEvent::L2D_CACHE_RD
+                                       : ArmPmuEvent::L2D_CACHE);
+      ArmPmuEvent l2d_cache_refill(only_reads ? ArmPmuEvent::L2D_CACHE_REFILL_RD
+                                              : ArmPmuEvent::L2D_CACHE_REFILL);
+      ArmPmuEvent l3d_cache(only_reads ? ArmPmuEvent::L3D_CACHE_RD
+                                       : ArmPmuEvent::L3D_CACHE);
+      ArmPmuEvent l3d_cache_refill(only_reads ? ArmPmuEvent::L3D_CACHE_REFILL_RD
+                                              : ArmPmuEvent::L3D_CACHE_REFILL);
+      ArmPmuEvent cpu_l3d_cache_refill(only_reads
+                                           ? ArmPmuEvent::L3D_CACHE_REFILL_RD
+                                           : ArmPmuEvent::L3D_CACHE_REFILL);
+      ArmPmuEvent cpu_cycle(ArmPmuEvent::CPU_CYCLES);
+
+      st_retired.Start();
+      ld_retired.Start();
+      mem_access.Start();
+      ll_cache.Start();
+      ll_cache_miss.Start();
+      l1d_cache.Start();
+      l1d_cache_refill.Start();
+      l1d_tlb.Start();
+      l1d_tlb_refill.Start();
+
+      l2d_cache.Start();
+      l2d_cache_refill.Start();
+      l3d_cache.Start();
+      l3d_cache_refill.Start();
+
+      cpu_cycle.Start();
+#endif
+
+      cpu_set_t a;
+      printf("%d %d %d %d => %d >  ", CPU_ISSET(0, &a), CPU_ISSET(1, &a),
+             CPU_ISSET(2, &a), CPU_ISSET(3, &a), sched_getcpu());
+
+      printf("omp_get_num_threads = %d. tid=%d\n", omp_get_num_threads(),
+             omp_get_thread_num());
+
+      int8_t *in = input + stride_in_c * c;
+      int retID = stride_out_c * c;
+      for (int i = 0; i < out_h; i++) {
+        for (int j = 0; j < out_w; j++) {
+          for (int u = 0; u < KH; u++) {
+            for (int v = 0; v < KW; v++) {
+              int row = u + i * stride_size - pad_size;
+              int col = v + j * stride_size - pad_size;
+              if (row < 0 || col < 0 || row >= H || col >= W)
+                ret[retID] = 0;
+              else {
+                int index = row * W + col;
+                ret[retID] = in[index];
+  }
+              retID++;
+            }
+          }
+
+          if (j % 4 == 0 && j != 0) {
+           //  printf("(core:%d) t:%d C:%d H:%d I:%d \n", sched_getcpu(), omp_get_thread_num(), c, j, i);
+
+            for (dim_t d = 0; d < KN; d += 4) {
+              mm_matrix_multiply_s8_v3(kernel + KH * KW * d + c * KH * KW * KN,
+                                       flat_input + c * out_w * out_h * KW * KH,
+                                       (int32_t *)output_ptr[c], KH * KW,
+                                       i * out_w + j, KH * KW, out_w,
+                                       filterOffset);
+            }
+          }
+
+          clock_t t1e = clock();
+           // printf("--- t:%d C:%d %f \n", omp_get_thread_num(), c, (double)(t1e- t1s)/CLOCKS_PER_SEC*1000);
+
+        } // end j
+      }
+
+#ifdef DEBUG_CORE_PERF_MON
+      cache_counts[c].st_retired = st_retired.Stop();
+      cache_counts[c].ld_retired = ld_retired.Stop();
+      cache_counts[c].mem_access = mem_access.Stop();
+      cache_counts[c].ll_cache = ll_cache.Stop();
+      cache_counts[c].ll_cache_miss = ll_cache_miss.Stop();
+      cache_counts[c].l1d_cache = l1d_cache.Stop();
+      cache_counts[c].l1d_cache_refill = l1d_cache_refill.Stop();
+      cache_counts[c].l1d_tlb = l1d_tlb.Stop();
+      cache_counts[c].l1d_tlb_refill = l1d_tlb_refill.Stop();
+      cache_counts[c].l2d_cache = l2d_cache.Stop();
+      cache_counts[c].l2d_cache_refill = l2d_cache_refill.Stop();
+      cache_counts[c].l3d_cache = l3d_cache.Stop();
+      cache_counts[c].l3d_cache_refill = l3d_cache_refill.Stop();
+      cache_counts[c].cpu_cycle = cpu_cycle.Stop();
+      printf("core=%d\n", sched_getcpu());
+      PrintCacheCounts(cache_counts[c]);
+#endif
+    } // end of channel
+  }
+
+  //    clock_t t1e = clock();
+  // printf("t:%d C:%d %f \n", omp_get_thread_num(), c, (double)(t1e-
+  // t1s)/CLOCKS_PER_SEC*1000);
+
+  clock_t t1e = clock();
+  cout << "linearize: : " << (double)(t1e - t1s) / CLOCKS_PER_SEC * 1000
+       << std::endl;
+  StartCacheCounts();
+  t2s = clock();
+
+  // For each output channel in the group:
+  // row=4
+
+  // mm_matrix_multiply_s8_v2_memory(kernel, flat_input, (int32_t *)mm_out_c, KH
+  // * KW, out_h * out_w, KH * KW, out_w, filterOffset);
+
+  //  #pragma omp parallel for num_threads(4)
+  //  for(int c=0;c<C;c++) {
+  // for (dim_t d = 0; d < KN; d+=4) {
+
+  //    mm_matrix_multiply_s8_v2(kernel + KH * KW * d + c*KH*KW*KN, flat_input +
+  //    c*out_w*out_h*KW*KH, (int32_t *)mm_out_c + c*out_w*out_h, KH * KW, out_h
+  //    * out_w, KH * KW, out_w, filterOffset);
+  // mm_matrix_multiply_s8_v2_memory(kernel + KH * KW * d + c*KH*KW*KN,
+  // flat_input + c*out_w*out_h*KW*KH, (int32_t *)mm_out_c + c*out_w*out_h, KH *
+  // KW, out_h * out_w, KH * KW, out_w, filterOffset);
+  // mm_matrix_multiply_s8(kernel + KH * KW * d + c*KH*KW*KN, flat_input +
+  // c*out_w*out_h*KW*KH, (int32_t *)mm_out_c + c*out_w*out_h, KH * KW, out_h *
+  // out_w, KH * KW, filterOffset); vector_scale_bias_offset_clip_s8(mm_out_c +
+  // d *out_w*out_h, *((int32_t*)bias+d), output  + (d*out_h*out_w) , scale,
+  // bscale, out_h * out_w , true, doRelu,outOffset);
+  // vector_scale_bias_offset_clip_s8(mm_out_c + (d+1)*out_w*out_h,
+  // *((int32_t*)bias+d), output  + ((d+1)*out_h*out_w) , scale, bscale, out_h *
+  // out_w , true, doRelu,outOffset); vector_scale_bias_offset_clip_s8(mm_out_c
+  // + (d+2)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+2)*out_h*out_w) ,
+  // scale, bscale, out_h * out_w , true, doRelu,outOffset);
+  // vector_scale_bias_offset_clip_s8(mm_out_c + (d+3)*out_w*out_h,
+  // *((int32_t*)bias+d), output  + ((d+3)*out_h*out_w) , scale, bscale, out_h *
+  // out_w , true, doRelu,outOffset);
+
+  //}
+
+  // }
+
+  /*
+  int32_t *inp_c[C];
+  for (int c = 0; c < C; c++)
+  {
+    inp_c[c] = mm_out_c + c*out_w*out_h;
+  }
+
+#pragma omp parallel for num_threads(4)
+  for (int i = 0; i < out_h; i++)
+  {
+    for (int j = 0; j < out_w; j++)
+    {
+      *inp_c[0] = *inp_c[0]+*inp_c[1]+*inp_c[2];
+      inp_c[0]++;
+      inp_c[1]++;
+      inp_c[2]++;
+    }
+  }
+
+#pragma omp parallel for num_threads(4)
+  for(int c=0;c<C;c++) {
+    for (dim_t d = 0; d < KN; d++) {
+
+        vector_scale_bias_offset_clip_s8(mm_out_c + d *out_w*out_h,
+    *((int32_t*)bias+d), output  + (d*out_h*out_w) , scale, bscale, out_h *
+    out_w , true, doRelu,outOffset);
+        //vector_scale_bias_offset_clip_s8(mm_out_c + (d+1)*out_w*out_h,
+    *((int32_t*)bias+d), output  + ((d+1)*out_h*out_w) , scale, bscale, out_h *
+    out_w , true, doRelu,outOffset);
+        //vector_scale_bias_offset_clip_s8(mm_out_c + (d+2)*out_w*out_h,
+    *((int32_t*)bias+d), output  + ((d+2)*out_h*out_w) , scale, bscale, out_h *
+    out_w , true, doRelu,outOffset);
+        //vector_scale_bias_offset_clip_s8(mm_out_c + (d+3)*out_w*out_h,
+    *((int32_t*)bias+d), output  + ((d+3)*out_h*out_w) , scale, bscale, out_h *
+    out_w , true, doRelu,outOffset);
+
+    }
+  }
+  */
+
+  clock_t t2e = clock();
+  StopCacheCounts(&cache_counts2);
+  cout << " nn + sc: : " << (double)(t2e - t2s) / CLOCKS_PER_SEC * 1000
+       << std::endl;
+
+  printf("----\n");
+  PrintCacheCounts(cache_counts2);
+
+#if DEBUG_INFO
+  if (d < KN) {
+
+    for (int j = 0; j < 2; j++) {
+      for (int i = 0; i < 2; i++) {
+        printf("%d ", mm_out_temp[i + j * out_w] + *((int32_t *)bias + d));
+            }
+            printf("\n");
+        }
+  }
+#endif
+
+#if DEBUG_INFO
+  if (d < KN) {
+
+    for (int j = 0; j < 2; j++) {
+      for (int i = 0; i < 2; i++) {
+        printf("(%d)", *(output + (d * out_h * out_w) + i + j * out_w));
+        if (i % 16 == 15)
+          printf(" / ");
+            }
+            printf("\n");
+        }
+    }
+#endif
+}
+
+typedef struct _param {
+  int8_t *input;
+  int8_t *kernel;
+  int8_t *output;
+  int out_h;
+  int out_w;
+  int KH;
+  int KN;
+  int KW;
+  int stride_size;
+  int pad_size;
+  int N;
+  int W;
+  int H;
+  int C;
+  int stride_in_c;
+  int stride_out_c;
+  int c; // current channel
+  int32_t filterOffset;
+} param;
+
+void *channel_conv_th(void *pp) {
+  param *p = (param *)pp;
+  int8_t *flat_input =
+      (int8_t *)malloc(p->KH * p->KW * p->out_h * p->out_w); // c= channel
+  int32_t *mm_out_c = (int32_t *)malloc(
+      p->KN * p->out_w * p->out_h *
+      sizeof(int32_t)); // 채널별로 나눠서 저장 후 나중에 합침.
+  int8_t *in = p->input + p->stride_in_c * p->c;
+
+  int retID = p->stride_out_c * p->c;
+
+  cpu_set_t m;
+  CPU_ZERO(&m);
+
+  if (p->c == 0) {
+    CPU_SET(1, &m);
+    pthread_setaffinity_np(pthread_self(), sizeof(m), (cpu_set_t *)&m);
+  } else if (p->c == 1) {
+    CPU_SET(2, &m);
+    pthread_setaffinity_np(pthread_self(), sizeof(m), (cpu_set_t *)&m);
+  } else if (p->c == 2) {
+    CPU_SET(3, &m);
+    pthread_setaffinity_np(pthread_self(), sizeof(m), (cpu_set_t *)&m);
+    }
+
+#ifdef DEBUG_CORE_PERF_MON
+  ArmPmuEvent st_retired(ArmPmuEvent::ST_RETIRED);
+  ArmPmuEvent ld_retired(ArmPmuEvent::LD_RETIRED);
+  ArmPmuEvent mem_access(only_reads ? ArmPmuEvent::MEM_ACCESS_RD
+                                    : ArmPmuEvent::MEM_ACCESS);
+  ArmPmuEvent ll_cache(only_reads ? ArmPmuEvent::LL_CACHE_RD
+                                  : ArmPmuEvent::LL_CACHE);
+  ArmPmuEvent ll_cache_miss(only_reads ? ArmPmuEvent::LL_CACHE_MISS_RD
+                                       : ArmPmuEvent::LL_CACHE_MISS);
+  ArmPmuEvent l1d_cache(only_reads ? ArmPmuEvent::L1D_CACHE_RD
+                                   : ArmPmuEvent::L1D_CACHE);
+  ArmPmuEvent l1d_cache_refill(only_reads ? ArmPmuEvent::L1D_CACHE_REFILL_RD
+                                          : ArmPmuEvent::L1D_CACHE_REFILL);
+  ArmPmuEvent l1d_tlb(only_reads ? ArmPmuEvent::L1D_TLB_RD
+                                 : ArmPmuEvent::L1D_TLB);
+  ArmPmuEvent l1d_tlb_refill(only_reads ? ArmPmuEvent::L1D_TLB_REFILL_RD
+                                        : ArmPmuEvent::L1D_TLB_REFILL);
+  ArmPmuEvent l2d_cache(only_reads ? ArmPmuEvent::L2D_CACHE_RD
+                                   : ArmPmuEvent::L2D_CACHE);
+  ArmPmuEvent l2d_cache_refill(only_reads ? ArmPmuEvent::L2D_CACHE_REFILL_RD
+                                          : ArmPmuEvent::L2D_CACHE_REFILL);
+  ArmPmuEvent l3d_cache(only_reads ? ArmPmuEvent::L3D_CACHE_RD
+                                   : ArmPmuEvent::L3D_CACHE);
+  ArmPmuEvent l3d_cache_refill(only_reads ? ArmPmuEvent::L3D_CACHE_REFILL_RD
+                                          : ArmPmuEvent::L3D_CACHE_REFILL);
+  ArmPmuEvent cpu_l3d_cache_refill(only_reads ? ArmPmuEvent::L3D_CACHE_REFILL_RD
+                                              : ArmPmuEvent::L3D_CACHE_REFILL);
+  ArmPmuEvent cpu_cycle(ArmPmuEvent::CPU_CYCLES);
+
+  st_retired.Start();
+  ld_retired.Start();
+  mem_access.Start();
+  ll_cache.Start();
+  ll_cache_miss.Start();
+  l1d_cache.Start();
+  l1d_cache_refill.Start();
+  l1d_tlb.Start();
+  l1d_tlb_refill.Start();
+
+  l2d_cache.Start();
+  l2d_cache_refill.Start();
+  l3d_cache.Start();
+  l3d_cache_refill.Start();
+
+  cpu_cycle.Start();
+#endif
+  clock_t t1s = clock();
+
+  for (int i = 0; i < p->out_h; i++) {
+    for (int j = 0; j < p->out_w; j++) {
+      for (int u = 0; u < p->KH; u++) {
+        for (int v = 0; v < p->KW; v++) {
+          int row = u + i * p->stride_size - p->pad_size;
+          int col = v + j * p->stride_size - p->pad_size;
+          if (row < 0 || col < 0 || row >= p->H || col >= p->W)
+            flat_input[retID] = 0;
+          else {
+            int index = row * p->W + col;
+            flat_input[retID] = in[index];
+        }
+          retID++;
+        }
+      }
+
+      if (j % 4 == 0 && j != 0) {
+         printf("(core:%d) C:%d H:%d I:%d \n", sched_getcpu(), p->c, j, i);
+
+        for (dim_t d = 0; d < p->KN; d += 4) {
+          mm_matrix_multiply_s8_v3(p->kernel + p->KH * p->KW * d, flat_input,
+                                   (int32_t *)mm_out_c, p->KH * p->KW,
+                                   i * p->out_w + j, p->KH * p->KW, p->out_w,
+                                   p->filterOffset);
+    }
+      }
+
+       clock_t t1e = clock();
+       printf("--- t:%d C:%d %f \n", omp_get_thread_num(), p->c, (double)(t1e- t1s)/CLOCKS_PER_SEC*1000);
+
+    } // end j
+        }
+
+#ifdef DEBUG_CORE_PERF_MON
+
+  CacheCounts cache_counts;
+  cache_counts.st_retired = st_retired.Stop();
+  cache_counts.ld_retired = ld_retired.Stop();
+  cache_counts.mem_access = mem_access.Stop();
+  cache_counts.ll_cache = ll_cache.Stop();
+  cache_counts.ll_cache_miss = ll_cache_miss.Stop();
+  cache_counts.l1d_cache = l1d_cache.Stop();
+  cache_counts.l1d_cache_refill = l1d_cache_refill.Stop();
+  cache_counts.l1d_tlb = l1d_tlb.Stop();
+  cache_counts.l1d_tlb_refill = l1d_tlb_refill.Stop();
+  cache_counts.l2d_cache = l2d_cache.Stop();
+  cache_counts.l2d_cache_refill = l2d_cache_refill.Stop();
+  cache_counts.l3d_cache = l3d_cache.Stop();
+  cache_counts.l3d_cache_refill = l3d_cache_refill.Stop();
+  cache_counts.cpu_cycle = cpu_cycle.Stop();
+  printf("core=%d\n", sched_getcpu());
+  PrintCacheCounts(cache_counts);
+#endif
+  clock_t t1e = clock();
+  printf("--- C:%d %f \n", p->c, (double)(t1e - t1s) / CLOCKS_PER_SEC * 1000);
+  free(flat_input);
+  free(mm_out_c);
+    }
+
+// input nchw, output nchw
+// im2col + conv
+void fwdConvolution_nchw_mm_v3(
+    int8_t *input, int8_t *kernel, int8_t *bias, int8_t *output, float inS,
+    float kS, float bS, float outS, int32_t inOffset, int32_t filterOffset,
+    int32_t biasOffset, int32_t outOffset, dim_t N, dim_t C, dim_t H, dim_t W,
+    dim_t KN, dim_t KH, dim_t KW, int pad_size, int stride_size, size_t group,
+    size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
+
+  // only support KN%4
+  assert(KN % 4 == 0);
+  assert((out_w * out_w) % 16 == 0);
+
+  float outScale = outS;
+  float inScale = inS;
+  float filterScale = kS;
+  float biasScale = bS;
+
+  // Calculate the scale of the values that come out of the matrix
+  // multiplication part of the calculation.
+  float matMulScale = inScale * filterScale;
+  float scale = matMulScale / outScale;
+  float bscale = biasScale / matMulScale;
+
+//#if DEBUG_INFO
+#if 1
+  printf("off i:%d f:%d b:%d o:%d\n", inOffset, filterOffset, biasOffset,
+         outOffset);
+
+  printf("\nscale:%f\n", scale);
+  printf("bscale:%f\n", bscale);
+#endif
+
+  //  int8_t* kernel_vec = (int8_t*)malloc (KH*KW*C); // 1 filter * channel
+
+  CacheCounts cache_counts[3];
+  CacheCounts cache_counts2;
+
+  // make patched input
+  // For each convolution 'jump' in the input tensor:
+  clock_t t1s = clock();
+
+  clock_t t2s;
+
+  int num = sysconf(_SC_NPROCESSORS_CONF);
+  printf("core num:%d ---\n", num);
+
+  omp_set_num_threads(4);
+
+  param p[3];
+  for (int c = 0; c < 3; c++) {
+    p[c].input = input + W * H * c;
+    p[c].kernel = kernel + c * KW * KH * KN;
+    p[c].output = output + c * out_w * out_h;
+    p[c].out_h = out_h;
+    p[c].out_w = out_w;
+    p[c].KH = KH;
+    p[c].KN = KN;
+    p[c].KW = KW;
+    p[c].stride_size = stride_size;
+    p[c].pad_size = pad_size;
+    p[c].N = N;
+    p[c].W = W;
+    p[c].H = H;
+    p[c].C = C;
+    p[c].stride_in_c = W * H;
+    p[c].stride_out_c = KH * KW * out_w * out_h;
+    p[c].c = c; // current channel
+    p[c].filterOffset = filterOffset;
+}
+
+  cpu_set_t mask;
+  CPU_ZERO(&mask);
+
+  pthread_t p_thread[3];
+  void *pRtn;
+  pthread_create(&p_thread[0], NULL, channel_conv_th, (void *)&p[0]);
+  pthread_create(&p_thread[1], NULL, channel_conv_th, (void *)&p[1]);
+  pthread_create(&p_thread[2], NULL, channel_conv_th, (void *)&p[2]);
+
+  pthread_join(p_thread[0], (void **)pRtn);
+  pthread_join(p_thread[1], (void **)pRtn);
+  pthread_join(p_thread[2], (void **)pRtn);
+
+  clock_t t1e = clock();
+  cout << "linearize: : " << (double)(t1e - t1s) / CLOCKS_PER_SEC * 1000
+       << std::endl;
+}
+
+
 
 int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                       int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
