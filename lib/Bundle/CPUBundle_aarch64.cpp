@@ -137,9 +137,10 @@ struct CacheCounts {
   int l2d_cache_refill = 0;
   int l3d_cache = 0;
   int l3d_cache_refill = 0;
+  int cpu_cycle = 0;
 };
 
-void PrintCacheCounts(const CacheCounts& cache_counts) {
+void PrintCacheCounts(const CacheCounts &cache_counts) {
   printf("st_retired = %d\n", cache_counts.st_retired);
   printf("ld_retired = %d\n", cache_counts.ld_retired);
   printf("mem_access = %d\n", cache_counts.mem_access);
@@ -153,6 +154,7 @@ void PrintCacheCounts(const CacheCounts& cache_counts) {
   printf("l2d_cache_refill = %d\n", cache_counts.l2d_cache_refill);
   printf("l3d_cache = %d\n", cache_counts.l3d_cache);
   printf("l3d_cache_refill = %d\n", cache_counts.l3d_cache_refill);
+  printf("cpu cycle= %d\n", cache_counts.cpu_cycle);
 }
 
 const bool only_reads = false;
@@ -180,6 +182,9 @@ ArmPmuEvent l3d_cache(only_reads ? ArmPmuEvent::L3D_CACHE_RD
                                  : ArmPmuEvent::L3D_CACHE);
 ArmPmuEvent l3d_cache_refill(only_reads ? ArmPmuEvent::L3D_CACHE_REFILL_RD
                                         : ArmPmuEvent::L3D_CACHE_REFILL);
+ArmPmuEvent cpu_l3d_cache_refill(only_reads ? ArmPmuEvent::L3D_CACHE_REFILL_RD
+                                            : ArmPmuEvent::L3D_CACHE_REFILL);
+ArmPmuEvent cpu_cycle(ArmPmuEvent::CPU_CYCLES);
 
 void StartCacheCounts() {
   st_retired.Start();
@@ -196,6 +201,7 @@ void StartCacheCounts() {
   l2d_cache_refill.Start();
   l3d_cache.Start();
   l3d_cache_refill.Start();
+  cpu_cycle.Start();
 }
 
 void StopCacheCounts(CacheCounts* cache_counts)
@@ -213,6 +219,7 @@ void StopCacheCounts(CacheCounts* cache_counts)
   cache_counts->l2d_cache_refill = l2d_cache_refill.Stop();
   cache_counts->l3d_cache = l3d_cache.Stop();
   cache_counts->l3d_cache_refill = l3d_cache_refill.Stop();
+  cache_counts->cpu_cycle = cpu_cycle.Stop();
 }
 
 

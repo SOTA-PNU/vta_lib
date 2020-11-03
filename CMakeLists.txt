@@ -47,7 +47,7 @@ else()
     if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
         add_compile_options(-std=c++14 -faligned-new -O0 -g -Wall -fPIC  -fPIC  -Wno-psabi)
     else()
-        add_compile_options(-std=c++14 -faligned-new -O3 -Wall -fPIC  -fPIC  -Wno-psabi)
+        add_compile_options(-std=c++14 -faligned-new -O3 -Wall -fPIC  -static -fopenmp  -Wno-psabi)
     endif()
     INCLUDE_DIRECTORIES(include include/zcu102)
     #link_libraries(prebuilt_lib)
@@ -61,7 +61,7 @@ else()
 endif()
 
 target_link_libraries(VTABundle PUBLIC
-        vta_runtime LLVMSupport pthread glog gflags)
+        vta_runtime LLVMSupport pthread glog gflags gomp)
 
 if(NOT NESTC_VTA_RUN_ON_AARCH64)
 
