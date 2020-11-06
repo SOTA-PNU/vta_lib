@@ -3433,42 +3433,7 @@ printf("is:%f, io%d I(%d,%d,%d,%d) os:%f oo:%d I(%d,%d,%d,%d)  K(%d,%d) pad:%d, 
 }
 
 
-int avgpool(int8_t* input, float inputScale, int32_t inputOffset, int8_t *output, float outputScale, int32_t outputOffset,
-            dim_t inputDim0, dim_t inputDim1, dim_t inputDim2, dim_t inputDim3,
-            dim_t outputDim0, dim_t outputDim1, dim_t outputDim2, dim_t outputDim3,
-            unsigned_t KH, unsigned_t KW, unsigned_t pad_size, unsigned_t stride_size) {
 
-#if DEBUG_INFO
-  printf("is:%f, io%d I(%d,%d,%d,%d) os:%f oo:%d I(%d,%d,%d,%d)  K(%d,%d) pad:%d, st:%d\n",
- inputScale, inputOffset, inputDim0, inputDim1,  inputDim2,  inputDim3,
-  outputScale, outputOffset,
-        outputDim0,  outputDim1, outputDim2, outputDim3,  KH,  KW,  pad_size, stride_size);
-#endif
-  avgpool_nxn_nhwc(input,inputScale, inputOffset, output, outputScale, outputOffset, inputDim0, inputDim1,  inputDim2,  inputDim3,
-                   outputDim0,  outputDim1, outputDim2, outputDim3,  KH,  KW,  pad_size, stride_size);
-
-/*
-  std::array<unsigned_t,4> padsS = {pad_size, pad_size, pad_size, pad_size};
-  llvm::ArrayRef<unsigned_t> padShape(padsS);
-
-  std::array<unsigned_t,2> kernelS = {KH, KW};
-  llvm::ArrayRef<unsigned_t> kernelShape(kernelS);
-
-  std::array<unsigned_t,2> strideS = {stride_size, stride_size};
-  llvm::ArrayRef<unsigned_t> strideShape(strideS);
-
-  llvm::SmallVector<dim_t, 4> inputDims = {inputDim0, inputDim1, inputDim2, inputDim3};
-  Type inputType(ElemKind::Int8QTy, inputDims, inputScale, inputOffset);
-  Tensor inputs((void*)input, &inputType);
-
-  llvm::SmallVector<dim_t, 4> outputDims = {outputDim0, outputDim1, outputDim2, outputDim3};
-  Type outputType(ElemKind::Int8QTy, outputDims, outputScale, outputOffset);
-  Tensor outputs((void*)output, &outputType);
-
-  fwdAvgPoolInstI8Impl(&inputs, &outputs, kernelShape, strideShape, padShape);
-  return 0;
-*/
-}
 
 int quantize(int8_t *input, int8_t *output, dim_t size, float scale, int32_t offset){
   const float32x4_t       scale_v = vdupq_n_f32( 1.0f / scale);
