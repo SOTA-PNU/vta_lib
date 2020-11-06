@@ -901,8 +901,13 @@ void vector_matrix_multiply_s8(int8_t *lhs_ptr, int8_t *rhs_ptr, int32_t *accum_
 
   const int16x4_t vfilterOff = vdup_n_s16(filterOffset);
 
-  for (int nblock = 0; nblock < width_b / 8; nblock++)
+  const int wb = width_b / 8;
+
+  #pragma omp parallel for num_threads(4)
+  for (int nblock = 0; nblock < wb; nblock++)
   {
+      
+     // printf("%d) => %d /  ",nblock,sched_getcpu());
     // 8 width
     int32x4_t c0[8];
 
@@ -3176,11 +3181,11 @@ void maxpool_nxn_nhwc(int8_t *input, int8_t *output, dim_t N, dim_t H, dim_t W, 
   }
 
   int p=(int)pad_size;
-  int out_w = ((W+2*p + 1) - (KW - 1))/stride_size;
-  int out_h = ((H+2*p +1) - (KH - 1))/stride_size;
+  int out_w = ((W+2*p - KW )/stride_size) + 1;
+  int out_h = ((H+2*p - KH )/stride_size) + 1;  
 
 #if DEBUG_INFO
-  printf("out_w =%d, out_h=%d\n",out_w, out_h);
+  printf("maxpool NHWC=%d,%d,%d,%d out_w =%d, out_h=%d\n",N,H,W,C,out_w, out_h);
 #endif
 
   for(int n=0;n<N;n++)
@@ -3228,7 +3233,7 @@ void maxpool_nxn_nhwc(int8_t *input, int8_t *output, dim_t N, dim_t H, dim_t W, 
           // Store result
           // TODO check if qinfo matters. in orignal code, true means input , output scale offsets are same
           // org code -> (input_qinfo != output_qinfo) ? vrequantize_pooling<q8x8_t, q8x16_t>(wrapper::vgetlow(vres), wrapper::vgethigh(vres), requant_qinfo) :
-          int out_idx = n* out_w*out_w*C +ho*out_w*C + wo*C + (c*16);
+          int out_idx = n* out_w*out_h*C +ho*out_w*C + wo*C + (c*16);
           vst1q_s8(output+out_idx,  vres);
 #if DEBUG_INFO
           //debug
@@ -3295,28 +3300,35 @@ int relu(int8_t* input, int8_t *output, unsigned_t size, float inputScale, float
   return 0;
 }
 
-void avgpool_nxn_nhwc(int8_t *input, float inputScale, int32_t inputOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C,
+int avgpool(int8_t *input, float inputScale, int32_t inputOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C,
                       dim_t outputDim0, dim_t outputDim1, dim_t outputDim2, dim_t outputDim3,unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
                       unsigned_t stride_size) {
+
+  #if 1
+printf("is:%f, io%d I(%d,%d,%d,%d) os:%f oo:%d I(%d,%d,%d,%d)  K(%d,%d) pad:%d, st:%d\n",
+ inputScale, inputOffset, N, H, W, C, 
+  outputScale, outputOffset,   
+        outputDim0,  outputDim1, outputDim2, outputDim3,  KH,  KW,  pad_size, stride_size);
+#endif
 
   //TODO padding > 1
 
   // kernel size = nXn
   // nhwc. channel should be multiple of 16
-  if(KH!=KW && pad_size!=1) {
+  if(KH!=KW && pad_size<=1) {
     printf("!!!!!!!!!! not impl yet\n");
-    return;
+    return -1;
   }
 
   const float32x4_t             half_scale_v = vdupq_n_f32(0.5f);
   int p=(int)pad_size;
-  int out_w = ((W+2*p + 1) - (KW - 1))/stride_size;
-  int out_h = ((H+2*p +1) - (KH - 1))/stride_size;
+  int out_w = ((W+2*p - KW )/stride_size) + 1;
+  int out_h = ((H+2*p - KH )/stride_size) + 1;  
 
   const float scale = 1.0f * (inputScale / outputScale / (KW*KH));
 
 #if DEBUG_INFO
-  printf("scale:%f\n",scale);
+  printf("avgpool scale:%f outw:%d outh:%d\n",scale, out_w, out_h);
 #endif
 
   for(int n=0;n<N;n++)
@@ -3416,7 +3428,7 @@ void avgpool_nxn_nhwc(int8_t *input, float inputScale, int32_t inputOffset, int8
   }
 #endif
 
-  return;
+  return 0;
 
 }
 
