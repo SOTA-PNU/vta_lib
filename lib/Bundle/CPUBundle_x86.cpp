@@ -328,10 +328,78 @@ void fwdConvolutionInstQuantizedImpl(
         }   // H
       }     // C
     }       // G
-  }         // N
+  }         // NS
+}
+int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
+                      int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
+                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w)
+{
+
+  dim_t inCperG = C / group;
+  dim_t outCperG = KN / group;
+  float matMulScale = inputScale * kernelScale;
+  for (dim_t n = 0; n < N; n++) {
+    // For each group of input channels:
+    for (dim_t g = 0; g < group; g++) {
+
+      // For each output channel in the group:
+      for (dim_t d = g * outCperG; d < (g + 1) * outCperG; d++) {
+
+        // For each convolution 'jump' in the input tensor:
+        ssize_t x = -ssize_t(pad_size);
+        for (dim_t ax = 0; ax < out_h; x += stride_size, ax++) {
+          ssize_t y = -ssize_t(pad_size);
+          for (dim_t ay = 0; ay < out_w; y += stride_size, ay++) {
+
+            // For each element in the convolution-filter:
+            int32_t sum = 0;
+            for (dim_t fx = 0; fx < KH; fx++) {
+              for (dim_t fy = 0; fy < KW; fy++) {
+                int64_t ox = x + fx * dilation;
+                int64_t oy = y + fy * dilation;
+
+                // Ignore index access below zero (this is due to padding).
+                if (ox < 0 || oy < 0 || ox >= ssize_t(H) ||
+                    oy >= int64_t(W)) {
+                  continue;
+                }
+                for (dim_t fd = 0; fd < inCperG; fd++) {
+
+                  int32_t F = (int32_t)*(kernel+d*KH*KW*inCperG + fx*KW*inCperG + fy*inCperG + fd);
+                  int32_t I = (int32_t)*(input+n*H*W*C + ox*W*C + oy*C+ (g*inCperG +fd));
+                  // We represent the element multiplication with offset as
+                  // (value - offset).
+                  sum += (F - kernelOffset) * (I - inputOffset);
+                }
+              }
+            }
+
+            // Scale the bias to match the scale of the matrix multiplication.
+            int32_t B =std::round(float(*((int32_t *)bias+d) - biasOffset) *
+                                  (biasScale / matMulScale));
+
+            // Add the bias.
+            sum += B;
+
+            if(doRelu && sum<0){
+              sum = 0;
+            }
+            // Scale the result back to the expected destination scale.
+            auto out32 = std::round(float(sum) * (matMulScale / outputScale) + outputOffset);
+            int8_t out8;
+            if(out32>127) out8=127;
+            else if(out32<-128) out8=-128;
+            else out8=(int8_t)out32;
+            *(output + n*out_h*out_w*KN + ax*out_w*KN + ay*KN + d) = out8;
+          } // W
+        }   // H
+      }     // C
+    }       // G
+  }         // NS
+
 }
 
-int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
+int cpuvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                       int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
                       int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
   llvm::SmallVector<dim_t, 4> inputDims = {N,H,W,C};
@@ -403,10 +471,7 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
             pads, group, dilation, doRelu);
   }
   else {
-    fwdConvolutionInstQuantizedImpl(
-            &inV, &outV, &filterV, biasV,
-            kernelSizes, strides,
-            pads, group, dilation, doRelu);
+    assert(0=="This is not a VTA Convolution");
   }
   return 0;
 }
