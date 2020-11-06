@@ -51,8 +51,29 @@ else()
     endif()
     INCLUDE_DIRECTORIES(include include/zcu102)
     #link_libraries(prebuilt_lib)
-    add_library(vta_runtime lib/zcu102/api.cc lib/zcu102/pynq_driver.cc)
+    add_library(vta_runtime lib/zcu102/api.cc lib/zcu102/pynq_driver.cc) 
+    link_libraries(arm_compute_graph arm_compute arm_compute_core)
     add_subdirectory(tests/zcu102)
+    #target_link_libraries(gomp)
+    #target_link_libraries(vta_runtime lib/acl/libarm_compute_graph-static.a arm_compute lib/acl/libarm_compute-static.a arm_compute lib/acl/libarm_compute_core-static.a)
+    
+    find_library(EXTERN_ACL_COMPUTE_LIB
+            NAMES arm_compute libarm_compute
+            HINTS "lib/acl"
+            )
+    find_library(EXTERN_ACL_COMPUTE_CORE_LIB
+            NAMES arm_compute_core libarm_compute_core
+            HINTS "lib/acl"
+            )
+    find_library(EXTERN_ACL_COMPUTE_GRAPH_LIB
+            NAMES arm_compute_graph libarm_compute_graph
+            HINTS "lib/acl"
+            )
+    message(STATUS "Build with Arm Compute Library graph runtime support: "
+    ${EXTERN_ACL_COMPUTE_LIB} ", \n"
+    ${EXTERN_ACL_COMPUTE_CORE_LIB} ", \n"
+    ${EXTERN_ACL_COMPUTE_GRAPH_LIB})
+    target_link_libraries(vta_runtime ${EXTERN_ACL_COMPUTE_LIB}  ${EXTERN_ACL_COMPUTE_CORE_LIB} ${EXTERN_ACL_COMPUTE_GRAPH_LIB})
 endif()
 if(NESTC_VTA_RUN_ON_AARCH64)
     add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle_aarch64.cpp)
