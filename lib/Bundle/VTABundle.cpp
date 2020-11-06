@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <vector>
-
+#include <fstream>
+#include <iostream>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -911,7 +912,7 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
   transpose_vtaio2nhwc(dbg_input, nhwc_input, N, H, W, C);
   transpose_vtak2nhwc(dbg_kernel, nhwc_weight, KN, KH, KW, C);
 
-  nonvtaconvolution(nhwc_input, 1.0, 0,
+  cpuvtaconvolution(nhwc_input, 1.0, 0,
                     nhwc_weight, 1.0, 0,
                     dbg_bias, 1.0, 0,
                     temp_output, nonvtascale, 0, N, H, W, C, KN, KH, KW,
@@ -1180,7 +1181,7 @@ int convolution_wo_tr_wo_ch(int8_t* input, int8_t *kernel, int32_t *bias, int8_t
     transpose_vtaio2nhwc(dbg_input, nhwc_input, N, H, W, C);
     transpose_vtak2nhwc(dbg_kernel, nhwc_weight, KN, KH, KW, C);
 
-    nonvtaconvolution(nhwc_input, 1.0, 0,
+    cpuvtaconvolution(nhwc_input, 1.0, 0,
                       nhwc_weight, 1.0, 0,
                       dbg_bias, 1.0, 0,
                       temp_output, nonvtascale, 0, N, H, W, C, KN, KH, KW,
@@ -1400,7 +1401,7 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
     transpose_vtaio2nhwc(dbg_input, nhwc_input, N, H, W, C);
     transpose_vtak2nhwc(dbg_kernel, nhwc_weight, KN, KH, KW, C);
 
-    nonvtaconvolution(nhwc_input, 1.0, 0,
+    cpuvtaconvolution(nhwc_input, 1.0, 0,
                       nhwc_weight, 1.0, 0,
                       dbg_bias, 1.0, 0,
                       temp_output, nonvtascale, 0, N, H, W, C, KN, KH, KW,
