@@ -902,6 +902,7 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
     fos.close();
   }
 
+#ifndef VTA_RUN_ON_AARCH64
   float nonvtascale = 1.0;
   for (int i = 0; i < shift; i++) {
     nonvtascale *= 2;
@@ -942,8 +943,11 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
     }
   }
 
-
-
+  free(temp_output);
+  free(nhwc_input);
+  free(nhwc_weight);
+#endif
+  free(transposed_output);
 #endif
 
   // end case
@@ -1170,7 +1174,7 @@ int convolution_wo_tr_wo_ch(int8_t* input, int8_t *kernel, int32_t *bias, int8_t
       fos.close();
     }
 
-
+#ifndef VTA_RUN_ON_AARCH64
     float nonvtascale = 1.0;
     for (int i = 0; i < shift; i++) {
       nonvtascale *= 2;
@@ -1215,6 +1219,7 @@ int convolution_wo_tr_wo_ch(int8_t* input, int8_t *kernel, int32_t *bias, int8_t
     free(temp_output);
     free(nhwc_input);
     free(nhwc_weight);
+#endif
     free(transposed_output);
   }
 #endif
@@ -1390,7 +1395,7 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
       fos.close();
     }
 
-
+#ifndef VTA_RUN_ON_AARCH64
     float nonvtascale = 1.0;
     for (int i = 0; i < shift; i++) {
       nonvtascale *= 2;
@@ -1432,9 +1437,11 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
       }
     }
 
+
     free(temp_output);
     free(nhwc_input);
     free(nhwc_weight);
+#endif
     free(transposed_output);
   }
 #endif
