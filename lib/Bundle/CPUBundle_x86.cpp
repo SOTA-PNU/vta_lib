@@ -330,74 +330,87 @@ void fwdConvolutionInstQuantizedImpl(
     }       // G
   }         // NS
 }
+
 int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                       int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
-                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w)
-{
+                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
+  llvm::SmallVector<dim_t, 4> inputDims = {N,H,W,C};
+  Type inputType(ElemKind::Int8QTy, inputDims, inputScale, inputOffset);
+  Tensor inV((void*)input, &inputType);
 
-  dim_t inCperG = C / group;
-  dim_t outCperG = KN / group;
-  float matMulScale = inputScale * kernelScale;
-  for (dim_t n = 0; n < N; n++) {
-    // For each group of input channels:
-    for (dim_t g = 0; g < group; g++) {
+  llvm::SmallVector<dim_t, 4> outputDims = {N,(dim_t)out_h,(dim_t)out_w,KN};
+  Type outputType(ElemKind::Int8QTy, outputDims, outputScale, outputOffset);
+  Tensor outV((void*)output, &outputType);
 
-      // For each output channel in the group:
-      for (dim_t d = g * outCperG; d < (g + 1) * outCperG; d++) {
+  llvm::SmallVector<dim_t, 4> kernelDims = {KN,KH,KW,C};
+  Type kernelType(ElemKind::Int8QTy, kernelDims, kernelScale, kernelOffset);
+  Tensor filterV((void*)kernel, &kernelType);
 
-        // For each convolution 'jump' in the input tensor:
-        ssize_t x = -ssize_t(pad_size);
-        for (dim_t ax = 0; ax < out_h; x += stride_size, ax++) {
-          ssize_t y = -ssize_t(pad_size);
-          for (dim_t ay = 0; ay < out_w; y += stride_size, ay++) {
+  Tensor* biasV;
+  if(doBias) {
+    llvm::SmallVector<dim_t, 1> biasDims = {KN};
+    Type biasType(ElemKind::Int32QTy, biasDims, biasScale, biasOffset);
+    biasV = new Tensor((void *) bias, &biasType);
+  }
+  else{
+    biasV = new Tensor(ElemKind::Int32QTy, {KN}, 1.0, 0);
+    biasV->zero();
+  }
 
-            // For each element in the convolution-filter:
-            int32_t sum = 0;
-            for (dim_t fx = 0; fx < KH; fx++) {
-              for (dim_t fy = 0; fy < KW; fy++) {
-                int64_t ox = x + fx * dilation;
-                int64_t oy = y + fy * dilation;
+  std::array<unsigned_t,2> kernelS = {(unsigned_t)KH, (unsigned_t)KW};
+  llvm::ArrayRef<unsigned_t> kernelSizes(kernelS);
 
-                // Ignore index access below zero (this is due to padding).
-                if (ox < 0 || oy < 0 || ox >= ssize_t(H) ||
-                    oy >= int64_t(W)) {
-                  continue;
-                }
-                for (dim_t fd = 0; fd < inCperG; fd++) {
+  std::array<unsigned_t,2> strideS = {(unsigned_t)stride_size, (unsigned_t)stride_size};
+  llvm::ArrayRef<unsigned_t> strides(strideS);
 
-                  int32_t F = (int32_t)*(kernel+d*KH*KW*inCperG + fx*KW*inCperG + fy*inCperG + fd);
-                  int32_t I = (int32_t)*(input+n*H*W*C + ox*W*C + oy*C+ (g*inCperG +fd));
-                  // We represent the element multiplication with offset as
-                  // (value - offset).
-                  sum += (F - kernelOffset) * (I - inputOffset);
-                }
-              }
-            }
+  std::array<unsigned_t,4> padS = {(unsigned_t)pad_size, (unsigned_t)pad_size, (unsigned_t)pad_size, (unsigned_t)pad_size};
+  llvm::ArrayRef<unsigned_t> pads(padS);
 
-            // Scale the bias to match the scale of the matrix multiplication.
-            int32_t B =std::round(float(*((int32_t *)bias+d) - biasOffset) *
-                                  (biasScale / matMulScale));
 
-            // Add the bias.
-            sum += B;
 
-            if(doRelu && sum<0){
-              sum = 0;
-            }
-            // Scale the result back to the expected destination scale.
-            auto out32 = std::round(float(sum) * (matMulScale / outputScale) + outputOffset);
-            int8_t out8;
-            if(out32>127) out8=127;
-            else if(out32<-128) out8=-128;
-            else out8=(int8_t)out32;
-            *(output + n*out_h*out_w*KN + ax*out_w*KN + ay*KN + d) = out8;
-          } // W
-        }   // H
-      }     // C
-    }       // G
-  }         // NS
 
+
+
+  float filterScale = kernelScale;
+  filterScale = 1/filterScale;
+  float inScale = inputScale;
+  inScale = 1/inScale;
+  //float biasScale = biasScale;
+  biasScale = 1/biasScale;
+  float matMulScale = inScale * filterScale;
+  float outScale = outputScale;
+  outScale = 1/outScale;
+  float scale =  matMulScale / outScale;
+  float tempScale = 1.0;
+  assert(scale > 1);
+  uint32_t shift = 0;
+  {
+    while(tempScale<scale)
+    {
+      tempScale *= 2;
+      shift++;
+    }
+  }
+
+  int32_t outOffset = outputOffset;
+  int32_t inOffset = inputOffset;
+  int32_t filterOffset = kernelOffset;
+  //int32_t biasOffset = biasOffset;
+  if(C%16 ==0 && KN%16 ==0 && tempScale==scale && biasScale==matMulScale && outOffset ==0 && inOffset ==0 && filterOffset ==0 && biasOffset ==0) {
+    fwdVTAConvolutionInstQuantizedImpl(
+        &inV, &outV, &filterV, biasV,
+        kernelSizes, strides,
+        pads, group, dilation, doRelu);
+  }
+  else {
+    fwdConvolutionInstQuantizedImpl(
+        &inV, &outV, &filterV, biasV,
+        kernelSizes, strides,
+        pads, group, dilation, doRelu);
+  }
+  return 0;
 }
+
 
 int cpuvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                       int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
