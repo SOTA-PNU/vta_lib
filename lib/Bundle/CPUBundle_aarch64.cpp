@@ -151,7 +151,7 @@ struct CacheCounts {
   int cpu_cycle = 0;
 };
 
-void PrintCacheCounts(const CacheCounts &cache_counts) {
+void PrintCacheCounts(const CacheCounts& cache_counts) {
   printf("st_retired = %d\n", cache_counts.st_retired);
   printf("ld_retired = %d\n", cache_counts.ld_retired);
   printf("mem_access = %d\n", cache_counts.mem_access);
@@ -166,6 +166,25 @@ void PrintCacheCounts(const CacheCounts &cache_counts) {
   printf("l3d_cache = %d\n", cache_counts.l3d_cache);
   printf("l3d_cache_refill = %d\n", cache_counts.l3d_cache_refill);
   printf("cpu cycle= %d\n", cache_counts.cpu_cycle);
+
+}
+
+void PrintCacheCountsRow(const CacheCounts& cache_counts) {
+ printf("%d,", cache_counts.st_retired);  
+  printf("%d,", cache_counts.ld_retired);
+  printf("%d,", cache_counts.mem_access);
+  printf("%d,", cache_counts.ll_cache);
+  printf("%d,", cache_counts.ll_cache_miss);
+  printf("%d,", cache_counts.l1d_tlb);
+  printf("%d,", cache_counts.l1d_tlb_refill);  
+  printf("%d,", cache_counts.l1d_cache);
+  printf("%d,", cache_counts.l1d_cache_refill);
+  printf("%d,", cache_counts.l2d_cache);
+  printf("%d,", cache_counts.l2d_cache_refill);
+  printf("%d,", cache_counts.l3d_cache);
+  printf("%d,", cache_counts.l3d_cache_refill);
+  printf("%d\n", cache_counts.cpu_cycle);
+
 }
 
 const bool only_reads = false;
