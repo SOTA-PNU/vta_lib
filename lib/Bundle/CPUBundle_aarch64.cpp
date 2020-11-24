@@ -612,9 +612,90 @@ void mm_s8_4x16n(const int8_t *lhs_ptr, const int8_t *rhs_ptr, int32_t *accum_pt
   }
 }
 
+
+int cpuvtaconvolution_f32(float* input, float inputScale, int32_t inputOffset, float *kernel, float kernelScale, int32_t kernelOffset,
+                          float *bias, float biasScale, int32_t biasOffset, float *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
+                          int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
+  dim_t inCperG = C / group;
+  dim_t outCperG = KN / group;
+  float matMulScale = inputScale * kernelScale;
+  for (dim_t n = 0; n < N; n++) {
+    // For each group of input channels:
+    for (dim_t g = 0; g < group; g++) {
+
+      // For each output channel in the group:
+      for (dim_t d = g * outCperG; d < (g + 1) * outCperG; d++) {
+
+        // For each convolution 'jump' in the input tensor:
+        ssize_t x = -ssize_t(pad_size);
+        for (dim_t ax = 0; ax < out_h; x += stride_size, ax++) {
+          ssize_t y = -ssize_t(pad_size);
+          for (dim_t ay = 0; ay < out_w; y += stride_size, ay++) {
+
+            // For each element in the convolution-filter:
+            float sum = 0.0;
+            for (dim_t fx = 0; fx < KH; fx++) {
+              for (dim_t fy = 0; fy < KW; fy++) {
+                int64_t ox = x + fx * dilation;
+                int64_t oy = y + fy * dilation;
+
+                // Ignore index access below zero (this is due to padding).
+                if (ox < 0 || oy < 0 || ox >= ssize_t(H) ||
+                    oy >= int64_t(W)) {
+                  continue;
+                }
+                for (dim_t fd = 0; fd < inCperG; fd++) {
+
+                  float F = *(kernel+d*KH*KW*inCperG + fx*KW*inCperG + fy*inCperG + fd);
+                  float I = *(input+n*H*W*C + ox*W*C + oy*C+ (g*inCperG +fd));
+                  // We represent the element multiplication with offset as
+                  // (value - offset).
+                  sum += (F - kernelOffset) * (I - inputOffset);
+                }
+              }
+            }
+
+            float B = *(bias+d);
+
+            // Add the bias.
+            sum += B;
+
+            if(doRelu && sum<0.0){
+              sum = 0.0;
+            }
+
+            *(output + n*out_h*out_w*KN + ax*out_w*KN + ay*KN + d) = sum;
+          } // W
+        }   // H
+      }     // C
+    }       // G
+  }         // NS
+  return 0;
+
+}
+
+
 int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
-  assert(0=="Disabled");
+  float inputScale = 0.0;
+  int32_t inputOffset = 0;
+  float kernelScale = 0.0;
+  int32_t kernelOffset = 0;
+  float biasScale = 0.0;
+  int32_t biasOffset = 0;
+  float outputScale = 0.0;
+  int32_t outputOffset = 0;
+
+  /*
+  nonvtaconvolution_f32((float *)input, inputScale, inputOffset, kernel, kernelScale, kernelOffset,
+                        (float *)bias, biasScale, biasOffset, (float *)output, outputScale,
+                        outputOffset, N, H, W, C, KN, KH, KW, pad_size,
+                            stride_size, group, dilation, doRelu, doBias, out_h, out_w);
+  */
+  cpuvtaconvolution_f32((float *)input, inputScale, inputOffset, (float *)kernel, kernelScale, kernelOffset,
+                        (float *)bias, biasScale, biasOffset, (float *)output, outputScale,
+                        outputOffset, N, H, W, C, KN, KH, KW, pad_size,
+                            stride_size, group, dilation, doRelu, doBias, out_h, out_w);
   return 0;
 }
 
