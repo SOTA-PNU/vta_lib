@@ -673,6 +673,12 @@ int cpuvtaconvolution_f32(float* input, float inputScale, int32_t inputOffset, f
   return 0;
 
 }
+void fwdConvolution_nhwc_acl_f32(float32_t *input, float32_t *kernel, float32_t *bias, float32_t *output, 
+                      float inS, float kS, float bS, float outS,
+                      int32_t inOffset, int32_t filterOffset, int32_t biasOffset, int32_t outOffset,
+                      dim_t N, dim_t C, dim_t H, dim_t W, dim_t KN, dim_t KH, dim_t KW, int pad_size, int stride_size, size_t group,
+                      size_t dilation, bool doRelu, bool doBias, 
+				 int out_h, int out_w);
 
 
 int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
@@ -686,16 +692,25 @@ int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output
   float outputScale = 0.0;
   int32_t outputOffset = 0;
 
-  /*
+  
   nonvtaconvolution_f32((float *)input, inputScale, inputOffset, kernel, kernelScale, kernelOffset,
                         (float *)bias, biasScale, biasOffset, (float *)output, outputScale,
                         outputOffset, N, H, W, C, KN, KH, KW, pad_size,
                             stride_size, group, dilation, doRelu, doBias, out_h, out_w);
-  */
+  
+  /*
   cpuvtaconvolution_f32((float *)input, inputScale, inputOffset, (float *)kernel, kernelScale, kernelOffset,
                         (float *)bias, biasScale, biasOffset, (float *)output, outputScale,
                         outputOffset, N, H, W, C, KN, KH, KW, pad_size,
                             stride_size, group, dilation, doRelu, doBias, out_h, out_w);
+  */
+  /*
+  fwdConvolution_nhwc_acl_f32((float *)input, (float *)kernel, 
+			      (float *)bias, (float *)output, inputScale, kernelScale, biasScale, outputScale, 0,0,0,0,
+			      N, C,H, W, KN, KH, KW, pad_size,
+                            stride_size, group, dilation, doRelu, doBias, out_h, out_w);
+  */
+
   return 0;
 }
 
@@ -3776,15 +3791,15 @@ int nonvtaconvolution_f32(float* input, float inputScale, int32_t inputOffset, i
 
   // input NHWC
   // kernel CHWN
-  float *kernel_f32 = (float*)malloc(C*KN*KW*KN*sizeof(float));
-  for(int k=0;k<C*KN*KW*KN;k++) kernel_f32[k]=(float)kernel[k]*kernelScale;
+  //float *kernel_f32 = (float*)malloc(C*KN*KW*KN*sizeof(float));
+  //for(int k=0;k<C*KN*KW*KN;k++) kernel_f32[k]=(float)kernel[k]*kernelScale;
 
-  fwdConvolution_nhwc_acl_f32(input, kernel_f32, bias,output,
+  fwdConvolution_nhwc_acl_f32(input, (float*)kernel, bias,output,
                        inputScale, kernelScale, biasScale, outputScale, 0,0,0,0,
                         N,C,H,W, KN, KH, KW,  pad_size, stride_size, 1,
                         dilation, doRelu, doBias, out_h, out_w);
 
-  free(kernel_f32);
+  //  free(kernel_f32);
 
   // return NCHW format
 
