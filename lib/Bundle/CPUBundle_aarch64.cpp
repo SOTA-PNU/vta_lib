@@ -2505,7 +2505,6 @@ printf("Kernel N=0\n")  ;
     kernelT.allocator()->allocate();                        
 
     if(bias!=nullptr && doBias) {
-      for(int k=0;k<KN;k++) bias[k] = *((int32_t*)(bias+k))* bS;    // input bias is int32
       biasT.allocator()->allocate();                      
       auto *bptr = reinterpret_cast<int8_t *>(biasT.buffer());
       memcpy(bptr,bias, KN*sizeof(float));
