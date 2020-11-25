@@ -2184,8 +2184,8 @@ printf("o:%p - %p\n",output, output+width);
 
 }
 
+
 // input nchw, output nchw
-/*
 void fwdConvolution_nchw_acl(int8_t *input, int8_t *kernel, int8_t *bias, int8_t *output, 
                       float inS, float kS, float bS, float outS,
                       int32_t inOffset, int32_t filterOffset, int32_t biasOffset, int32_t outOffset,
@@ -2193,23 +2193,35 @@ void fwdConvolution_nchw_acl(int8_t *input, int8_t *kernel, int8_t *bias, int8_t
                       size_t dilation, bool doRelu, bool doBias, 
                       int out_h, int out_w) {
 
-  // only support KN%4
-  assert(KN%4 ==0);
-  assert((out_w*out_w)%16==0);
 
   
-  float outScale = outS;
-  float inScale = inS;
-  float filterScale = kS;
-  float biasScale = bS;
 
-  // Calculate the scale of the values that come out of the matrix
-  // multiplication part of the calculation.
-    float matMulScale = inScale * filterScale;
-    float scale = matMulScale / outScale;
-    float bscale = biasScale / matMulScale;  
+  #if 0
 
+   for(int c=0;c<3;c++)
+   {
+       printf("\nCH=%d\n", c);
  
+    for(int h=0;h<5;h++) {
+      for(int w=0;w<5;w++) {
+         printf("%d ",input[c*H*W + h*W + w]);
+      }
+      printf("\n");
+    } 
+  }
+printf("0----- Kernel N=0\n")  ;
+   for(int c=0;c<3;c++)
+   {
+       printf("\nCH=%d\n", c);
+  
+    for(int h=0;h<7;h++) {
+      for(int w=0;w<7;w++) {
+         printf("%d ",kernel[c*KW*KH + h*KW + w+0]);
+      }
+      printf("\n");
+    } 
+  }
+#endif
     CacheCounts cache_counts1;
     CacheCounts cache_counts2;
   StartCacheCounts();
@@ -2230,145 +2242,188 @@ void fwdConvolution_nchw_acl(int8_t *input, int8_t *kernel, int8_t *bias, int8_t
     }
 
 
-
-    //layer->outputs.push_back(MakeOutputTensor(node.GetOpShape()[0]));
-
     const arm_compute::DataType            data_type = arm_compute::DataType::QASYMM8_SIGNED;
 
     // Create tensor
     // input NCHW. 
-    const arm_compute::TensorShape         src_shape     =  arm_compute::TensorShape(H, W, C);
+    const arm_compute::TensorShape         src_shape     =  arm_compute::TensorShape(W, H, C);
     const arm_compute::TensorInfo info(src_shape, 1, data_type);
     //const size_t     required_alignment = 64;
     arm_compute::Tensor           inputT{};
     inputT.allocator()->init(info); //, required_alignment);
 
 
-    const arm_compute::TensorShape         shape3     =  arm_compute::TensorShape(KH,KW,src_shape.z(), KN); // src_shape z == C
+    const arm_compute::TensorShape         shape3     =  arm_compute::TensorShape(KW,KH,src_shape.z(), KN); // src_shape z == C
     const arm_compute::TensorInfo info3(shape3, 1, data_type);
     arm_compute::Tensor           kernelT{};
     kernelT.allocator()->init(info3); //, required_alignment);
 
 
-    // scale offset??
 
     const arm_compute::TensorShape         shape2     =  arm_compute::TensorShape(out_h, out_w, KN);
     const arm_compute::TensorInfo info2(shape2, 1, data_type);
     arm_compute::Tensor           outputT{};
     outputT.allocator()->init(info2); //, required_alignment);
 
+printf("\n-------------------------\ninS:%f, kernelS:%f outS:%f\n",inS,kS,outS);
+    // quantization
+    inputT.info()->set_quantization_info(QuantizationInfo(inS, 0));  // scale, offset
+    outputT.info()->set_quantization_info(QuantizationInfo(outS, 0));  // scale, offset
+    kernelT.info()->set_quantization_info(QuantizationInfo(kS, 0));  // scale, offset
+  /*
+    inputT.info()->set_quantization_info(QuantizationInfo(1.0f, 0));  // scale, offset
+    outputT.info()->set_quantization_info(QuantizationInfo(1.0f, 0));  // scale, offset
+    kernelT.info()->set_quantization_info(QuantizationInfo(1.0f, 0));  // scale, offset   
+*/
+    arm_compute::Tensor           biasT{};
+    if(bias!=nullptr && doBias) {
+      const arm_compute::TensorShape         shape4     =  arm_compute::TensorShape(KN);
+      const arm_compute::TensorInfo info4(shape4, 1, arm_compute::DataType::S32);
+      biasT.allocator()->init(info4); //, required_alignment);
+      //biasT.info()->set_quantization_info(QuantizationInfo(bS, 0)); 
+    }    
 
     
     arm_compute::NEConvolutionLayer act_func;
 
-    act_func.configure(&inputT, &kernelT, nullptr,
+  act_func.configure(&inputT, &kernelT, (bias!=nullptr && doBias) ? &biasT : nullptr,
                         &outputT, 
                         pad_stride_info, arm_compute::WeightsInfo(), dilation_2d, act_info);
-
-    act_func.configure(&inputT, &kernelT, nullptr,
-                        &outputT, 
-                        pad_stride_info); //, arm_compute::WeightsInfo(), dilation_2d, act_info);
 
 
     inputT.allocator()->allocate();
     outputT.allocator()->allocate();
     kernelT.allocator()->allocate();                        
+
+    auto *iptr = reinterpret_cast<int8_t *>(inputT.buffer());
+    auto *kptr = reinterpret_cast<int8_t *>(kernelT.buffer());
+    auto *optr = reinterpret_cast<int8_t *>(outputT.buffer());
+
+    memcpy(iptr,input, N*H*W*C);
+    memcpy(kptr,kernel, KN*KW*KH*C);
+
+    if(bias!=nullptr && doBias) {
+      biasT.allocator()->allocate();                      
+      auto *bptr = reinterpret_cast<int8_t *>(biasT.buffer());
+      memcpy(bptr,bias, KN * sizeof(int32_t));
+    }
+
     act_func.run();
 
+    memcpy(output, optr,out_w*out_h*KN);
 
     StopCacheCounts(&cache_counts1);
   clock_t t1e = clock();
-  cout <<"conv(acl) : "<<(double)(t1e- t1s)/CLOCKS_PER_SEC*1000 << std::endl;
+  cout <<"conv(acl nchw) : "<<(double)(t1e- t1s)/CLOCKS_PER_SEC*1000 << std::endl;
   PrintCacheCounts(cache_counts1);
 
  
-
-//    StopCacheCounts(&cache_counts1);
- // clock_t t1e = clock();
- // cout <<"linearize: : "<<(double)(t1e- t1s)/CLOCKS_PER_SEC*1000 << std::endl;
+}
 
 
+// input nhwc, output nhwc
+void fwdConvolution_nhwc_acl(int8_t *input, int8_t *kernel, int8_t *bias, int8_t *output, 
+                      float inS, float kS, float bS, float outS,
+                      int32_t inOffset, int32_t filterOffset, int32_t biasOffset, int32_t outOffset,
+                      dim_t N, dim_t C, dim_t H, dim_t W, dim_t KN, dim_t KH, dim_t KW, int pad_size, int stride_size, size_t group,
+                      size_t dilation, bool doRelu, bool doBias, 
+                      int out_h, int out_w) {
 
 
-  if(filterOffset!=0) printf("!!!!! check filterOffset");
- // clock_t t2s = clock();
 
+
+  // make patched input
+  // For each convolution 'jump' in the input tensor:
+  clock_t t1s = clock();
+
+
+    arm_compute::PadStrideInfo pad_stride_info = arm_compute::PadStrideInfo(stride_size,stride_size,pad_size,pad_size);
+    arm_compute::Size2D dilation_2d(dilation,dilation);
+
+     arm_compute::ActivationLayerInfo act_info;
+    if (doRelu) {
+        act_info = arm_compute::ActivationLayerInfo(
+            arm_compute::ActivationLayerInfo::ActivationFunction::RELU);
+    }
  
 
 
 
 
-  // For each output channel in the group:
-  // row=4
+    const arm_compute::DataType            data_type = arm_compute::DataType::QASYMM8_SIGNED;
 
-//mm_matrix_multiply_s8_v2_memory(kernel, flat_input, (int32_t *)mm_out_c, KH * KW, out_h * out_w, KH * KW, out_w, filterOffset);      
-
-
-#if 0
-      printf("kernel %d\n",d);
-      for(int c=0;c<C;c++)
-      {
-        for (int j = 0; j < KH; j++)
-        {
-          for (int i = 0; i < KW; i++)
-            {
-                printf("%x ",kernel_vec[i + j * KW + c*KH*KW]);
-            }
-          printf(" / ");
-        }
-        printf("\n");
-      }
-#endif        
+    // Create tensor
+    // input NCHW. 
+    const arm_compute::TensorShape         src_shape     =  arm_compute::TensorShape(C, W, H);
+    const arm_compute::TensorInfo info(src_shape, 1, data_type,arm_compute::DataLayout::NHWC);
+    //const size_t     required_alignment = 64;
+    arm_compute::Tensor           inputT{};
+    inputT.allocator()->init(info); //, required_alignment);
 
 
+    const arm_compute::TensorShape         shape3     =  arm_compute::TensorShape( C ,KW,KH,KN); // src_shape z == C
+    const arm_compute::TensorInfo info3(shape3, 1, data_type,arm_compute::DataLayout::NHWC);
+    arm_compute::Tensor           kernelT{};
+    kernelT.allocator()->init(info3); //, required_alignment);
+
+    // scale offset??
+
+    const arm_compute::TensorShape         shape2     =  arm_compute::TensorShape(KN,out_w, out_h);
+    const arm_compute::TensorInfo info2(shape2, 1, data_type,arm_compute::DataLayout::NHWC);
+    arm_compute::Tensor           outputT{};
+    outputT.allocator()->init(info2); //, required_alignment);
   
-  int32_t *inp_c[C];
-  for (int c = 0; c < C; c++)
-  {
-    inp_c[c] = mm_out_c + c*out_w*out_h;
+    arm_compute::Tensor           biasT{};
+    if(bias!=nullptr && doBias) {
+      const arm_compute::TensorShape         shape4     =  arm_compute::TensorShape(KN);
+      const arm_compute::TensorInfo info4(shape4, 1, arm_compute::DataType::S32);
+      biasT.allocator()->init(info4); //, required_alignment);
   }
   
-  #pragma omp parallel for num_threads(4)
-  for (int i = 0; i < out_h; i++)
-  {
-    for (int j = 0; j < out_w; j++)
-    {      
-        *inp_c[0] = *inp_c[0]+*inp_c[1]+*inp_c[2];
-        inp_c[0]++;
-        inp_c[1]++;
-        inp_c[2]++;
-    }
-  }
+  //printf("\n-------------------------\ninS:%f, kernelS:%f outS:%f bS:%f\n",inS,kS,outS,bS);
+    // quantization
+    inputT.info()->set_quantization_info(QuantizationInfo(inS, 0));  // scale, offset
+    outputT.info()->set_quantization_info(QuantizationInfo(outS, 0));  // scale, offset
+    kernelT.info()->set_quantization_info(QuantizationInfo(kS, 0));  // scale, offset
 
-  #pragma omp parallel for num_threads(4)
-  for(int c=0;c<C;c++) {
-    for (dim_t d = 0; d < KN; d++) { 
+    arm_compute::NEConvolutionLayer act_func;
+
+    act_func.configure(&inputT, &kernelT, (bias!=nullptr && doBias) ? &biasT : nullptr,
+                        &outputT, 
+                        pad_stride_info, arm_compute::WeightsInfo(), dilation_2d, act_info);
        
-      vector_scale_bias_offset_clip_s8(mm_out_c + d *out_w*out_h, *((int32_t*)bias+d), output  + (d*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
-      //vector_scale_bias_offset_clip_s8(mm_out_c + (d+1)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+1)*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
-      //vector_scale_bias_offset_clip_s8(mm_out_c + (d+2)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+2)*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
-      //vector_scale_bias_offset_clip_s8(mm_out_c + (d+3)*out_w*out_h, *((int32_t*)bias+d), output  + ((d+3)*out_h*out_w) , scale, bscale, out_h * out_w , true, doRelu,outOffset);
   
+    inputT.allocator()->allocate();
+    outputT.allocator()->allocate();
+    kernelT.allocator()->allocate();                        
+    
+    auto *iptr = reinterpret_cast<int8_t *>(inputT.buffer());
+    auto *kptr = reinterpret_cast<int8_t *>(kernelT.buffer());
+    auto *optr = reinterpret_cast<int8_t *>(outputT.buffer());
+
+    memcpy(iptr,input, N*H*W*C);
+    memcpy(kptr,kernel, KN*KW*KH*C);
+
+    if(bias!=nullptr && doBias) {
+      biasT.allocator()->allocate();                      
+      auto *bptr = reinterpret_cast<int8_t *>(biasT.buffer());
+      memcpy(bptr,bias, KN * sizeof(int32_t));
     }
-  }
     
+    act_func.run();
+
+      memcpy(output, optr,out_w*out_h*KN);
 
 
-  clock_t t2e = clock();
-    
- // cout <<"nn + sc: : "<<(double)(t2e- t2s)/CLOCKS_PER_SEC*1000 << std::endl;
-
-
-
-//PrintCacheCounts(cache_counts1);    
-printf("----\n");
-//PrintCacheCounts(cache_counts2);    
+  clock_t t1e = clock();
+  cout <<"conv(acl nhwc) : "<<(double)(t1e- t1s)/CLOCKS_PER_SEC*1000 << std::endl;
 
     
 
   
 }
-*/
+
+
 
 void fwdConvolution_nhwc_acl_f32(float32_t *input, float32_t *kernel, float32_t *bias, float32_t *output, 
                       float inS, float kS, float bS, float outS,
@@ -3823,33 +3878,9 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
                       int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
 
 
-  //TODO: scale converting?
-  float filterScale = kernelScale;
-  filterScale = 1/filterScale;
-  float inScale = inputScale;
-  inScale = 1/inScale;
-  float biScale = biasScale;
-  biScale = 1/biScale;
-  float matMulScale = inScale * filterScale;
-  float outScale = outputScale;
-  outScale = 1/outScale;
-  float scale =  matMulScale / outScale;
-  float tempScale = 1.0;
-  assert(scale > 1);
-  uint32_t shift = 0;
-  {
-    while(tempScale<scale)
-    {
-      tempScale *= 2;
-      shift++;
-    }
-  }
 
-#if DEBUG_INFO
-  printf("tempscale:%f scale:%f matmulscale:%f\n", tempScale, scale, matMulScale);
-#endif
-
- {
+//#define NCHW_CONV_S8
+#ifdef NCHW_CONV_S8
 
     printf("-- fwdVTAConv --: NHWC:%d,%d,%d,%d pad:%d, stride:%d scale i:%f o:%f b:%f f:%f, C:%d KH:%d KW:%d KN:%d \n",N,H,W,C,pad_size, stride_size, inputScale,outputScale,biasScale, kernelScale,C,KH,KW,KN);
 
@@ -3868,6 +3899,7 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
 
     //TODO change to neon
     // kernel nhwc -> nchw
+    #pragma omp parallel for num_threads(4)
     for(int kn=0;kn<KN;kn++)
     {
       for(int j=0;j<KH;j++)
@@ -3881,39 +3913,19 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
         }
       }
     }
-#if DEBUG_INFO
 
 
-    printf("NCHW_conv\n");
-      for(int j=0;j<H*C;j+=16)
-      {
-        for(int i=0;i<20;i++) printf("%02x ", input_nchw[i+j*W]) ;
-        printf("\n%d) ",j+16);
-      }
 
-#endif
-/* temporary disabled. mm version not complete
-    if(KN%4==0) { // && out_w*out_hKH*KW*C%16==0
-      printf("MM PATH");
-      fwdConvolution_nchw_mm(input_nchw, k_nchw, bias,output_nchw,
+    fwdConvolution_nchw_acl(input_nchw, k_nchw, bias,output_nchw,
                 inputScale, kernelScale, biasScale, outputScale, inputOffset, kernelOffset, biasOffset, outputOffset,
                                        N,C,H,W, KN, KH, KW,  pad_size, stride_size, 1,
                                        dilation, doRelu, doBias, out_h, out_w);
 
-    }
-    else {
-*/
-    printf("VEC PATH");
-    fwdConvolution_nchw(input_nchw, k_nchw, bias,output_nchw,
-                        inputScale, kernelScale, biasScale, outputScale, inputOffset, kernelOffset, biasOffset, outputOffset,
-                        N,C,H,W, KN, KH, KW,  pad_size, stride_size, 1,
-                        dilation, doRelu, doBias, out_h, out_w);
-
-//    }
 
 
     //TODO change to neon
     // output nchw -> nhwc && row-major <-> column-major
+    #pragma omp parallel for num_threads(4)
     for(int n=0;n<N;n++)
     {
       for(int j=0;j<out_h;j++)
@@ -3923,19 +3935,31 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
           for(int kn=0;kn<KN;kn++)
           {
 
-            output[n*out_w*out_h*KN + i*out_w*KN + j*KN + kn] = output_nchw[ n*out_w*out_h*KN + kn*out_w*out_h + j*out_w + i];
+            output[n*out_w*out_h*KN + j*out_w*KN + i*KN + kn] = output_nchw[ n*out_w*out_h*KN + kn*out_w*out_h + j*out_w + i];
           }
         }
       }
     }
 
+
     free(input_nchw);
     free(k_nchw);
     free(output_nchw);
 
-  }
 
   return 0;
+
+#else //nhwc
+
+    fwdConvolution_nhwc_acl(input, kernel, bias,output,
+                        inputScale, kernelScale, biasScale, outputScale, inputOffset, kernelOffset, biasOffset, outputOffset,
+                        N,C,H,W, KN, KH, KW,  pad_size, stride_size, 1,
+                        dilation, doRelu, doBias, out_h, out_w);
+
+  return 0;
+
+#endif // end nhwc
+
 }
 #endif
 
@@ -3951,57 +3975,74 @@ int fullyconnected_acl(int8_t* input, float inputScale, int32_t inputOffset, int
 
     // Create tensor
     // input NHWC. 
-    const arm_compute::TensorShape         src_shape     =  arm_compute::TensorShape(inputDim0,inputDim1);
+    const arm_compute::TensorShape         src_shape     =  arm_compute::TensorShape(inputDim1,inputDim0);
     const arm_compute::TensorInfo info(src_shape, 1, data_type);
     arm_compute::Tensor           inputT{};
     inputT.allocator()->init(info); //, required_alignment);
 
 
-    const arm_compute::TensorShape         shape2     =  arm_compute::TensorShape(kernelDim0, kernelDim1);
+    const arm_compute::TensorShape         shape2     =  arm_compute::TensorShape(kernelDim1, kernelDim0);
     const arm_compute::TensorInfo info2(shape2, 1, data_type);
     arm_compute::Tensor           weightT{};
     weightT.allocator()->init(info2); //, required_alignment);
 
     // kernelDim1 = num of lables? out, biase is shape of num lables
-    const arm_compute::TensorShape         shape3     =  arm_compute::TensorShape(kernelDim1);
+    const arm_compute::TensorShape         shape3     =  arm_compute::TensorShape(outputDim1,outputDim0);
     const arm_compute::TensorInfo info3(shape3, 1, data_type);
-    arm_compute::Tensor           biasT{};
-    biasT.allocator()->init(info3); //, required_alignment);
-    
     arm_compute::Tensor           outT{};
     outT.allocator()->init(info3); //, required_alignment);    
 
+    arm_compute::Tensor           biasT{};
+    if(bias!=nullptr && doBias) {
+      const arm_compute::TensorShape         shape4     =  arm_compute::TensorShape(outputDim1);
+      const arm_compute::TensorInfo info4(shape4, 1, arm_compute::DataType::S32);
+      biasT.allocator()->init(info4); //, required_alignment);
+      //biasT.info()->set_quantization_info(QuantizationInfo(bS, 0)); 
+    }    
+
+
+    inputT.info()->set_quantization_info(QuantizationInfo(inputScale, inputOffset));  // scale, offset
+    weightT.info()->set_quantization_info(QuantizationInfo(kernelScale, kernelOffset));  // scale, offset
+    outT.info()->set_quantization_info(QuantizationInfo(outputScale, outputOffset));  // scale, offset
+
 
     arm_compute::NEFullyConnectedLayer act_func;
+    FullyConnectedLayerInfo fc_info;
+    fc_info.transpose_weights    = false;
+    fc_info.are_weights_reshaped = false;    
 
-    act_func.configure(&inputT, &weightT, &biasT, &outT);
+    act_func.configure(&inputT, &weightT, (bias!=nullptr && doBias) ? &biasT : nullptr, &outT,fc_info);
 
     inputT.allocator()->allocate();
     weightT.allocator()->allocate();
-    biasT.allocator()->allocate();
     outT.allocator()->allocate();
 
     auto *iptr = reinterpret_cast<int8_t *>(inputT.buffer());
     auto *wptr = reinterpret_cast<int8_t *>(weightT.buffer());
-    auto *bptr = reinterpret_cast<int8_t *>(biasT.buffer());
     auto *optr = reinterpret_cast<int8_t *>(outT.buffer());
 
     memcpy(iptr,input, inputDim0 * inputDim0 );
     memcpy(wptr,kernel, kernelDim0 * kernelDim1 );
-    memcpy(bptr,bias, kernelDim1 );
+
+    if(bias!=nullptr && doBias) {
+      biasT.allocator()->allocate();                      
+      auto *bptr = reinterpret_cast<int8_t *>(biasT.buffer());
+      memcpy(bptr,bias, outputDim1 * sizeof(int32_t));
+    }
+   
 
     act_func.run();
 
-      memcpy(optr,output, outputDim0 * outputDim1 );
+    memcpy(output,optr, outputDim0 * outputDim1 );
 
   return 0;
 }
 
 
-int fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
+int fullyconnected_cpu(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                    int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset,
                    dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias) {
-#if DEBUG_INFO
+#if 1
   printf("fullly: in(%d.%d) is:%f io:%d -- kernel(%d,%d) ks:%f ko:%d -- out(%d,%d) os:%f oo:%d , doBais:%d bs:%f bo:%d\n",
    inputDim0, inputDim1, inputScale, inputOffset, kernelDim0, kernelDim1, kernelScale, kernelOffset, outputDim0, outputDim1, outputScale, outputOffset, doBias,biasScale,biasOffset);
 #endif
@@ -4048,6 +4089,19 @@ int fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t 
 }
 
 
+int fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
+                   int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset,
+                   dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias) {
+#if 1 // #ifdef CPU_CONV_DBG
+  return fullyconnected_cpu(input,inputScale,inputOffset,kernel, kernelScale,  kernelOffset,
+                   bias, biasScale, biasOffset, output, outputScale, outputOffset,
+                   inputDim0, inputDim1,  kernelDim0,  kernelDim1,  outputDim0,  outputDim1,  doBias);
+#else
+  return fullyconnected_acl(input,inputScale,inputOffset,kernel, kernelScale,  kernelOffset,
+                   bias, biasScale, biasOffset, output, outputScale, outputOffset,
+                   inputDim0, inputDim1,  kernelDim0,  kernelDim1,  outputDim0,  outputDim1,  doBias);
+#endif
+}
 
 void maxpool_nxn_nhwc(int8_t *input, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C,
                       unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
@@ -4162,19 +4216,16 @@ void maxpool_nhwc_acl(int8_t *input, int8_t *output, dim_t N, dim_t H, dim_t W, 
 
     // Create tensor
     // input NHWC. 
-    const arm_compute::TensorShape         src_shape     =  arm_compute::TensorShape(H, W, C);
-    const arm_compute::TensorInfo info(src_shape, 1, data_type);
+    const arm_compute::TensorShape         src_shape     =   arm_compute::TensorShape(C, W, H);
+    const arm_compute::TensorInfo info(src_shape, 1, data_type,arm_compute::DataLayout::NHWC);
     arm_compute::Tensor           inputT{};
     inputT.allocator()->init(info); //, required_alignment);
 
     // scale offset??
-    const arm_compute::TensorShape         shape2     =  arm_compute::TensorShape(out_h, out_w, C);
-    const arm_compute::TensorInfo info2(shape2, 1, data_type);
+    const arm_compute::TensorShape         shape2     =  arm_compute::TensorShape(C,out_w, out_h);
+    const arm_compute::TensorInfo info2(shape2, 1, data_type,arm_compute::DataLayout::NHWC);
     arm_compute::Tensor           outputT{};
     outputT.allocator()->init(info2); //, required_alignment);
-
-
-    
 
 
     arm_compute::NEPoolingLayer act_func;
@@ -4192,7 +4243,7 @@ void maxpool_nhwc_acl(int8_t *input, int8_t *output, dim_t N, dim_t H, dim_t W, 
 
     act_func.run();
 
-    memcpy(output, outputT.buffer(),out_w*out_h*C);
+    memcpy(output, optr,out_w*out_h*C);
 
 
 
@@ -4206,7 +4257,12 @@ int maxpool(int8_t* input, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, u
 
   printf("maxpool kh=%d kw=%d pad=%d str=%d DIM=N:%d H:%d W:%d C:%d\n", KH,KW,pad_size,stride_size, N,H,W,C );
 
+#ifdef CPU_CONV_DBG
   maxpool_nxn_nhwc(input,output,N,H,W,C,KH,KW,pad_size,stride_size);
+#else  
+  maxpool_nhwc_acl(input,output,N,H,W,C,KH,KW,pad_size,stride_size);  
+#endif
+
   return 0;
 
 }
@@ -4243,7 +4299,71 @@ int relu(int8_t* input, int8_t *output, unsigned_t size, float inputScale, float
   return 0;
 }
 
-int avgpool(int8_t *input, float inputScale, int32_t inputOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C,
+
+int avgpool_nhwc_acl(int8_t *input, float inputScale, int32_t inputOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C,
+                      dim_t outputDim0, dim_t outputDim1, dim_t outputDim2, dim_t outputDim3,unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
+                      unsigned_t stride_size) {
+
+  #if 1
+printf("avgpool acl is:%f, io%d I(%d,%d,%d,%d) os:%f oo:%d I(%d,%d,%d,%d)  K(%d,%d) pad:%d, st:%d\n",
+ inputScale, inputOffset, N, H, W, C, 
+  outputScale, outputOffset,   
+        outputDim0,  outputDim1, outputDim2, outputDim3,  KH,  KW,  pad_size, stride_size);
+#endif
+  
+
+  int p=(int)pad_size;
+  int out_w = ((W+2*p - KW )/stride_size) + 1;
+  int out_h = ((H+2*p - KH )/stride_size) + 1;  
+
+ 
+
+    arm_compute::PadStrideInfo pad_stride_info = arm_compute::PadStrideInfo(stride_size,stride_size,pad_size,pad_size);
+    arm_compute::Size2D poolsize(KH,KW);
+
+    arm_compute::PoolingLayerInfo pi(arm_compute::PoolingType::AVG, poolsize, DataLayout::NHWC, pad_stride_info,false,false);
+
+    const arm_compute::DataType            data_type = arm_compute::DataType::QASYMM8_SIGNED;
+
+    // Create tensor
+    // input NHWC. 
+    const arm_compute::TensorShape         src_shape     =   arm_compute::TensorShape(C, W, H);
+    const arm_compute::TensorInfo info(src_shape, 1, data_type,arm_compute::DataLayout::NHWC);
+    arm_compute::Tensor           inputT{};
+    inputT.allocator()->init(info); //, required_alignment);
+
+    // scale offset??
+    const arm_compute::TensorShape         shape2     =  arm_compute::TensorShape(C,out_w, out_h);
+    const arm_compute::TensorInfo info2(shape2, 1, data_type,arm_compute::DataLayout::NHWC);
+    arm_compute::Tensor           outputT{};
+    outputT.allocator()->init(info2); //, required_alignment);
+
+
+    arm_compute::NEPoolingLayer act_func;
+
+    act_func.configure(&inputT, &outputT, pi);
+
+  
+    inputT.allocator()->allocate();
+    outputT.allocator()->allocate();
+
+    auto *iptr = reinterpret_cast<int8_t *>(inputT.buffer());
+    auto *optr = reinterpret_cast<int8_t *>(outputT.buffer());
+
+    memcpy(iptr,input, N*H*W*C);
+
+    act_func.run();
+
+    memcpy(output, optr,out_w*out_h*C);
+
+
+
+
+}
+
+
+
+int avgpool_cpu(int8_t *input, float inputScale, int32_t inputOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C,
                       dim_t outputDim0, dim_t outputDim1, dim_t outputDim2, dim_t outputDim3,unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
                       unsigned_t stride_size) {
 
@@ -4375,6 +4495,18 @@ printf("is:%f, io%d I(%d,%d,%d,%d) os:%f oo:%d I(%d,%d,%d,%d)  K(%d,%d) pad:%d, 
 
 }
 
+int avgpool(int8_t *input, float inputScale, int32_t inputOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C,
+                      dim_t outputDim0, dim_t outputDim1, dim_t outputDim2, dim_t outputDim3,unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
+                      unsigned_t stride_size) {
+
+#if 0
+   avgpool
+#else
+   return avgpool_nhwc_acl(input,  inputScale,  inputOffset, output,  outputScale,  outputOffset,  N,  H,  W,  C,
+                       outputDim0,  outputDim1,  outputDim2,  outputDim3, KH,  KW,  pad_size, stride_size);
+#endif
+
+}
 
 
 
