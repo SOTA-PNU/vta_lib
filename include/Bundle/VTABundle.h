@@ -67,7 +67,14 @@ int elemadd_relu(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t
 int elemsub(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size);
 
+int elemsub_f32(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+            int8_t *output, float destScale, int32_t destOffset, unsigned_t size);
+
+
 int elemdiv(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+            int8_t *output, float destScale, int32_t destOffset, unsigned_t size);
+
+int elemdiv_f32(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size);
 
 int splat(int8_t *input, unsigned_t size, int8_t value);

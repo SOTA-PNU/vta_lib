@@ -21,7 +21,7 @@ using namespace glow;
 void fwdConvolutionInstFloatImpl(
         Tensor *inV, Tensor *outV, Tensor *filterV, Tensor *biasV,
         llvm::ArrayRef<unsigned_t> kernelSizes, llvm::ArrayRef<unsigned_t> strides,
-        llvm::ArrayRef<unsigned_t> pads, size_t group, size_t dilation) {
+        llvm::ArrayRef<unsigned_t> pads, size_t group, size_t dilation, bool doRelu) {
 
   auto inW = inV->getHandle<float>();
   auto outW = outV->getHandle<float>();
@@ -76,6 +76,9 @@ void fwdConvolutionInstFloatImpl(
             }
 
             sum += float(biasW.at({d}));
+            if(doRelu && sum<0.0){
+              sum = 0.0;
+            }
             outW.at({n, ax, ay, d}) = sum;
           } // W
         }   // H
@@ -87,7 +90,6 @@ void fwdConvolutionInstFloatImpl(
 
 int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
-  assert(doRelu==0);
   llvm::SmallVector<dim_t, 4> inputDims = {N,H,W,C};
   Type inputType(ElemKind::FloatTy, inputDims);
   Tensor inV((void*)input, &inputType);
@@ -122,7 +124,7 @@ int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output
   fwdConvolutionInstFloatImpl(
           &inV, &outV, &filterV, biasV,
           kernelSizes, strides,
-          pads, group, dilation);
+          pads, group, dilation, doRelu);
   return 0;
 }
 
@@ -853,6 +855,17 @@ int elemsub(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *inp
   return 0;
 }
 
+int elemsub_f32(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+            int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
+  for (dim_t i = 0, e = size; i < e; i++) {
+    float L = ((float*)input0)[i];
+    float R = ((float*)input1)[i];
+    ((float*)output)[i] = L - R;
+  }
+  return 0;
+}
+
+
 int elemdiv(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
   for (dim_t i = 0, e = size; i < e; i++) {
@@ -863,6 +876,16 @@ int elemdiv(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *inp
     float r = input1Scale * destScale * float(R - input1Offset);
     int32_t q = std::round(l / r + destOffset);
     output[i] = quantization::clip<int32_t, int8_t>(q);
+  }
+  return 0;
+}
+
+int elemdiv_f32(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+            int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
+  for (dim_t i = 0, e = size; i < e; i++) {
+    float L = ((float*)input0)[i];
+    float R = ((float*)input1)[i];
+    ((float*)output)[i] = L / R;
   }
   return 0;
 }

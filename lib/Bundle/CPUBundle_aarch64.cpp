@@ -4763,6 +4763,18 @@ int elemsub(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *inp
   return 0;
 }
 
+
+int elemsub_f32(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+                int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
+  for (dim_t i = 0, e = size; i < e; i++) {
+    float L = ((float*)input0)[i];
+    float R = ((float*)input1)[i];
+    ((float*)output)[i] = L - R;
+  }
+  return 0;
+}
+
+
 int elemdiv(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
 #if DEBUG_INFO
@@ -4821,6 +4833,19 @@ int elemdiv(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *inp
   }
   return 0;
 }
+
+
+int elemdiv_f32(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+                int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
+  for (dim_t i = 0, e = size; i < e; i++) {
+    float L = ((float*)input0)[i];
+    float R = ((float*)input1)[i];
+    ((float*)output)[i] = L / R;
+  }
+  return 0;
+}
+
+
 
 int splat(int8_t *output, unsigned_t size, int8_t value) {
 
