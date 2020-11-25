@@ -21,7 +21,7 @@ using namespace glow;
 void fwdConvolutionInstFloatImpl(
         Tensor *inV, Tensor *outV, Tensor *filterV, Tensor *biasV,
         llvm::ArrayRef<unsigned_t> kernelSizes, llvm::ArrayRef<unsigned_t> strides,
-        llvm::ArrayRef<unsigned_t> pads, size_t group, size_t dilation) {
+        llvm::ArrayRef<unsigned_t> pads, size_t group, size_t dilation, bool doRelu) {
 
   auto inW = inV->getHandle<float>();
   auto outW = outV->getHandle<float>();
@@ -76,6 +76,9 @@ void fwdConvolutionInstFloatImpl(
             }
 
             sum += float(biasW.at({d}));
+            if(doRelu && sum<0.0){
+              sum = 0.0;
+            }
             outW.at({n, ax, ay, d}) = sum;
           } // W
         }   // H
@@ -87,7 +90,6 @@ void fwdConvolutionInstFloatImpl(
 
 int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
-  assert(doRelu==0);
   llvm::SmallVector<dim_t, 4> inputDims = {N,H,W,C};
   Type inputType(ElemKind::FloatTy, inputDims);
   Tensor inV((void*)input, &inputType);
@@ -122,7 +124,7 @@ int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output
   fwdConvolutionInstFloatImpl(
           &inV, &outV, &filterV, biasV,
           kernelSizes, strides,
-          pads, group, dilation);
+          pads, group, dilation, doRelu);
   return 0;
 }
 
