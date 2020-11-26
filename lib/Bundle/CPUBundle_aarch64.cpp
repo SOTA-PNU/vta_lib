@@ -4260,7 +4260,8 @@ int maxpool(int8_t* input, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, u
 #ifdef CPU_CONV_DBG
   maxpool_nxn_nhwc(input,output,N,H,W,C,KH,KW,pad_size,stride_size);
 #else  
-  maxpool_nhwc_acl(input,output,N,H,W,C,KH,KW,pad_size,stride_size);  
+  //maxpool_nhwc_acl(input,output,N,H,W,C,KH,KW,pad_size,stride_size);
+  maxpool_nxn_nhwc(input,output,N,H,W,C,KH,KW,pad_size,stride_size);
 #endif
 
   return 0;
@@ -4499,8 +4500,9 @@ int avgpool(int8_t *input, float inputScale, int32_t inputOffset, int8_t *output
                       dim_t outputDim0, dim_t outputDim1, dim_t outputDim2, dim_t outputDim3,unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
                       unsigned_t stride_size) {
 
-#if 0
-   avgpool
+#if 1
+  return avgpool_cpu(input,  inputScale,  inputOffset, output,  outputScale,  outputOffset,  N,  H,  W,  C,
+                       outputDim0,  outputDim1,  outputDim2,  outputDim3, KH,  KW,  pad_size, stride_size);
 #else
    return avgpool_nhwc_acl(input,  inputScale,  inputOffset, output,  outputScale,  outputOffset,  N,  H,  W,  C,
                        outputDim0,  outputDim1,  outputDim2,  outputDim3, KH,  KW,  pad_size, stride_size);
