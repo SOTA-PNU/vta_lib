@@ -88,24 +88,11 @@ target_link_libraries(VTABundle PUBLIC
 if(NOT NESTC_VTA_RUN_ON_AARCH64)
 
 
-    if(NOT HAVE_QUANTIZATIONBASE_LIB)
-        target_link_libraries(VTABundle PUBLIC
-                QuantizationBase)
-    else()
-        target_link_libraries(VTABundle PUBLIC
-                ${HAVE_QUANTIZATIONBASE_LIB})
-        message(STATUS "Using Prebuilt QuantizationBase")
-    endif()
+    target_link_libraries(VTABundle PUBLIC
+            QuantizationBase)
 
-
-    if(NOT HAVE_SUPPORT_LIB)
-        target_link_libraries(VTABundle PUBLIC
-                Support)
-    else()
-        target_link_libraries(VTABundle PUBLIC
-                ${HAVE_SUPPORT_LIB})
-        message(STATUS "Using Prebuilt Support")
-    endif()
+    target_link_libraries(VTABundle PUBLIC
+            Support)
 
     target_link_libraries(VTABundle PUBLIC
             Base)
