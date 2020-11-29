@@ -918,37 +918,28 @@ int elemmax(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *inp
 
 int softmax(int8_t *input, int8_t *output, dim_t inDim0, dim_t inDim1,
             dim_t outDim0, dim_t outDim1){
-  llvm::SmallVector<dim_t, 2> inputDims = {inDim0, inDim1};
-  Type inputType(ElemKind::FloatTy, inputDims);
-  Tensor inputs((void*)input, &inputType);
-
-  llvm::SmallVector<dim_t, 2> outputDims = {outDim0, outDim1};
-  Type outputType(ElemKind::FloatTy, outputDims);
-  Tensor outputs((void*)output, &outputType);
-
-  auto inW = inputs.getHandle<float>();
-  auto outW = outputs.getHandle<float>();
-  auto idim = inW.dims();
-
-  for (dim_t n = 0; n < idim[0]; n++) {
+  float *inputP = (float *)input;
+  float *outputP = (float *)output;
+  for (dim_t n = 0; n < inDim0; n++) {
     // Find Max.
-    float max = float(inW.at({n, 0}));
-    for (dim_t i = 1; i < idim[1]; i++) {
-      max = std::max(max, float(inW.at({n, i})));
+    float max = inputP[n * inDim0];
+    for (dim_t i = 1; i < inDim1; i++) {
+      max = std::max(max, inputP[n * inDim0 + i]);
     }
 
     // Compute exp.
     float sum = 0;
-    for (dim_t i = 0; i < idim[1]; i++) {
-      float e = std::exp(float(inW.at({n, i})) - max);
+    for (dim_t i = 0; i < inDim1; i++) {
+      float e = std::exp(inputP[n * inDim0 + i] - max);
       sum += e;
-      outW.at({n, i}) = float(e);
+      outputP[n*inDim0 +i] = float(e);
     }
     // Normalize the output.
-    for (dim_t i = 0; i < idim[1]; i++) {
-      outW.at({n, i}) = float(outW.at({n, i})) / sum;
+    for (dim_t i = 0; i < inDim1; i++) {
+      outputP[n*inDim0 +i] =
+          outputP[n*inDim0 +i] / sum;
     }
-  } // N
+  }
 
   return 0;
 }

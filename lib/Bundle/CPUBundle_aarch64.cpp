@@ -4928,9 +4928,30 @@ int elemmax(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *inp
 
 int softmax(int8_t *input, int8_t *output, dim_t inDim0, dim_t inDim1,
             dim_t outDim0, dim_t outDim1){
-  //TODO : re-imprement
+  float *inputP = (float *)input;
+  float *outputP = (float *)output;
+  for (dim_t n = 0; n < inDim0; n++) {
+    // Find Max.
+    float max = inputP[n * inDim0];
+    for (dim_t i = 1; i < inDim1; i++) {
+      max = std::max(max, inputP[n * inDim0 + i]);
+    }
 
-  return -1;
+    // Compute exp.
+    float sum = 0;
+    for (dim_t i = 0; i < inDim1; i++) {
+      float e = std::exp(inputP[n * inDim0 + i] - max);
+      sum += e;
+      outputP[n*inDim0 +i] = float(e);
+    }
+    // Normalize the output.
+    for (dim_t i = 0; i < inDim1; i++) {
+      outputP[n*inDim0 +i] =
+          outputP[n*inDim0 +i] / sum;
+    }
+  }
+
+  return 0;
 }
 
 
