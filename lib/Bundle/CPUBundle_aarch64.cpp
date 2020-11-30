@@ -2314,8 +2314,8 @@ printf("\n-------------------------\ninS:%f, kernelS:%f outS:%f\n",inS,kS,outS);
 
     StopCacheCounts(&cache_counts1);
   clock_t t1e = clock();
-  cout <<"conv(acl nchw) : "<<(double)(t1e- t1s)/CLOCKS_PER_SEC*1000 << std::endl;
-  PrintCacheCounts(cache_counts1);
+  //cout <<"conv(acl nchw) : "<<(double)(t1e- t1s)/CLOCKS_PER_SEC*1000 << std::endl;
+  //PrintCacheCounts(cache_counts1);
 
  
 }
@@ -2416,7 +2416,7 @@ void fwdConvolution_nhwc_acl(int8_t *input, int8_t *kernel, int8_t *bias, int8_t
 
 
   clock_t t1e = clock();
-  cout <<"conv(acl nhwc) : "<<(double)(t1e- t1s)/CLOCKS_PER_SEC*1000 << std::endl;
+  //cout <<"conv(acl nhwc) : "<<(double)(t1e- t1s)/CLOCKS_PER_SEC*1000 << std::endl;
 
     
 
@@ -2578,8 +2578,8 @@ printf("Kernel N=0\n")  ;
 
     StopCacheCounts(&cache_counts1);
   clock_t t1e = clock();
-  cout <<"conv(acl_f32) : "<<(double)(t1e- t1s)/CLOCKS_PER_SEC*1000 << std::endl;
-  PrintCacheCounts(cache_counts1);
+  //cout <<"conv(acl_f32) : "<<(double)(t1e- t1s)/CLOCKS_PER_SEC*1000 << std::endl;
+  //PrintCacheCounts(cache_counts1);
 
 #if 0
 printf("Output kN=0\n")  ;
@@ -2726,8 +2726,8 @@ for(int k=0;k<4;k++) { cnt[k]=0; m1[k]=0; m2[k]=0; }
 
 #pragma omp critical(print)  
 {
-   printf("%d,",pr);
-  PrintCacheCountsRow(CC);      
+  // printf("%d,",pr);
+  //PrintCacheCountsRow(CC);      
 }
 
 #if DEBUG_INFO_V
@@ -3400,8 +3400,8 @@ void fwdConvolution_nchw_mm_v2(
       cache_counts[c].l3d_cache = l3d_cache.Stop();
       cache_counts[c].l3d_cache_refill = l3d_cache_refill.Stop();
       cache_counts[c].cpu_cycle = cpu_cycle.Stop();
-      printf("core=%d\n", sched_getcpu());
-      PrintCacheCounts(cache_counts[c]);
+      //printf("core=%d\n", sched_getcpu());
+      //PrintCacheCounts(cache_counts[c]);
 #endif
     } // end of channel
   }
@@ -3496,7 +3496,7 @@ void fwdConvolution_nchw_mm_v2(
        << std::endl;
 
   printf("----\n");
-  PrintCacheCounts(cache_counts2);
+  //PrintCacheCounts(cache_counts2);
 
 #if DEBUG_INFO
   if (d < KN) {
@@ -3670,7 +3670,7 @@ void *channel_conv_th(void *pp) {
   cache_counts.l3d_cache_refill = l3d_cache_refill.Stop();
   cache_counts.cpu_cycle = cpu_cycle.Stop();
   printf("core=%d\n", sched_getcpu());
-  PrintCacheCounts(cache_counts);
+  //PrintCacheCounts(cache_counts);
 #endif
   clock_t t1e = clock();
   printf("--- C:%d %f \n", p->c, (double)(t1e - t1s) / CLOCKS_PER_SEC * 1000);
@@ -3966,7 +3966,7 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
 int fullyconnected_acl(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                    int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset,
                    dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias) {
-#if 1
+#if 0
    printf("fullly: in(%d.%d) is:%f io:%d -- kernel(%d,%d) ks:%f ko:%d -- out(%d,%d) os:%f oo:%d , doBais:%d bs:%f bo:%d\n",
    inputDim0, inputDim1, inputScale, inputOffset, kernelDim0, kernelDim1, kernelScale, kernelOffset, outputDim0, outputDim1, outputScale, outputOffset, doBias,biasScale,biasOffset);
 #endif 
@@ -4042,7 +4042,7 @@ int fullyconnected_acl(int8_t* input, float inputScale, int32_t inputOffset, int
 int fullyconnected_cpu(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                    int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset,
                    dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias) {
-#if 1
+#if 0
   printf("fullly: in(%d.%d) is:%f io:%d -- kernel(%d,%d) ks:%f ko:%d -- out(%d,%d) os:%f oo:%d , doBais:%d bs:%f bo:%d\n",
    inputDim0, inputDim1, inputScale, inputOffset, kernelDim0, kernelDim1, kernelScale, kernelOffset, outputDim0, outputDim1, outputScale, outputOffset, doBias,biasScale,biasOffset);
 #endif
@@ -4255,7 +4255,7 @@ void maxpool_nhwc_acl(int8_t *input, int8_t *output, dim_t N, dim_t H, dim_t W, 
 int maxpool(int8_t* input, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
             unsigned_t stride_size){
 
-  printf("maxpool kh=%d kw=%d pad=%d str=%d DIM=N:%d H:%d W:%d C:%d\n", KH,KW,pad_size,stride_size, N,H,W,C );
+  //printf("maxpool kh=%d kw=%d pad=%d str=%d DIM=N:%d H:%d W:%d C:%d\n", KH,KW,pad_size,stride_size, N,H,W,C );
 
 #ifdef CPU_CONV_DBG
   maxpool_nxn_nhwc(input,output,N,H,W,C,KH,KW,pad_size,stride_size);
@@ -4305,7 +4305,7 @@ int avgpool_nhwc_acl(int8_t *input, float inputScale, int32_t inputOffset, int8_
                       dim_t outputDim0, dim_t outputDim1, dim_t outputDim2, dim_t outputDim3,unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
                       unsigned_t stride_size) {
 
-  #if 1
+  #if 0
 printf("avgpool acl is:%f, io%d I(%d,%d,%d,%d) os:%f oo:%d I(%d,%d,%d,%d)  K(%d,%d) pad:%d, st:%d\n",
  inputScale, inputOffset, N, H, W, C, 
   outputScale, outputOffset,   
@@ -4368,7 +4368,7 @@ int avgpool_cpu(int8_t *input, float inputScale, int32_t inputOffset, int8_t *ou
                       dim_t outputDim0, dim_t outputDim1, dim_t outputDim2, dim_t outputDim3,unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
                       unsigned_t stride_size) {
 
-  #if 1
+  #if 0
 printf("is:%f, io%d I(%d,%d,%d,%d) os:%f oo:%d I(%d,%d,%d,%d)  K(%d,%d) pad:%d, st:%d\n",
  inputScale, inputOffset, N, H, W, C, 
   outputScale, outputOffset,   
