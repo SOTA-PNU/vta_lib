@@ -440,7 +440,7 @@ int cpuvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
     biasV->zero();
   }
 
-  std::array<unsigned_t,2> kernelS = {(unsigned_t)KH, (unsigned_t)KW};
+    std::array<unsigned_t,2> kernelS = {(unsigned_t)KH, (unsigned_t)KW};
   llvm::ArrayRef<unsigned_t> kernelSizes(kernelS);
 
   std::array<unsigned_t,2> strideS = {(unsigned_t)stride_size, (unsigned_t)stride_size};

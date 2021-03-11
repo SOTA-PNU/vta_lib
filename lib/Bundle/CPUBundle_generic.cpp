@@ -1,0 +1,730 @@
+#include <iostream>
+#include <ctime>
+#include <cstring>
+#include <cstdint>
+#include <fstream>
+#include <vector>
+
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <cassert>
+#include "llvm/ADT/ArrayRef.h"
+//#include "glow/Base/Tensor.h"
+//#include "glow/Quantization/Base/Base.h"
+
+#include "vta/vtalib/include/Bundle/VTABundle.h"
+
+using namespace std;
+//using namespace glow;
+int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
+                     int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
+    dim_t inCperG = C / group;
+    dim_t outCperG = KN / group;
+
+    for (dim_t n = 0; n < N; n++) {
+        // For each group of input channels:
+        for (dim_t g = 0; g < group; g++) {
+
+            // For each output channel in the group:
+            for (dim_t d = g * outCperG; d < (g + 1) * outCperG; d++) {
+
+                // For each convolution 'jump' in the input tensor:
+                ssize_t x = -ssize_t(pad_size);
+                for (dim_t ax = 0; ax < out_h; x += stride_size, ax++) {
+                    ssize_t y = -ssize_t(pad_size);
+                    for (dim_t ay = 0; ay < out_w; y += stride_size, ay++) {
+
+                        // For each element in the convolution-filter:
+                        float sum = 0.0;
+                        for (dim_t fx = 0; fx < KH; fx++) {
+                            for (dim_t fy = 0; fy < KW; fy++) {
+                                int64_t ox = x + fx * dilation;
+                                int64_t oy = y + fy * dilation;
+
+                                // Ignore index access below zero (this is due to padding).
+                                if (ox < 0 || oy < 0 || ox >= ssize_t(H) ||
+                                    oy >= int64_t(W)) {
+                                    continue;
+                                }
+                                for (dim_t fd = 0; fd < inCperG; fd++) {
+
+                                    float F = *((float*)kernel+d*KH*KW*inCperG + fx*KW*inCperG + fy*inCperG + fd);
+                                    float I = *((float*)input+n*H*W*C + ox*W*C + oy*C+ (g*inCperG +fd));
+                                    // We represent the element multiplication with offset as
+                                    // (value - offset).
+                                    sum += F * I;
+                                }
+                            }
+                        }
+
+                        float B = *((float *)bias+d);
+
+                        // Add the bias.
+                        sum += B;
+
+                        if(doRelu && sum<0.0){
+                            sum = 0.0;
+                        }
+
+                        *((float *)output + n*out_h*out_w*KN + ax*out_w*KN + ay*KN + d) = sum;
+                    } // W
+                }   // H
+            }     // C
+        }       // G
+    }         // NS
+    return 0;
+}
+
+
+int cpuvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
+                      int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
+                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
+    dim_t inCperG = C / group;
+    dim_t outCperG = KN / group;
+    float matMulScale = inputScale * kernelScale;
+    for (dim_t n = 0; n < N; n++) {
+        // For each group of input channels:
+        for (dim_t g = 0; g < group; g++) {
+
+            // For each output channel in the group:
+            for (dim_t d = g * outCperG; d < (g + 1) * outCperG; d++) {
+
+                // For each convolution 'jump' in the input tensor:
+                ssize_t x = -ssize_t(pad_size);
+                for (dim_t ax = 0; ax < out_h; x += stride_size, ax++) {
+                    ssize_t y = -ssize_t(pad_size);
+                    for (dim_t ay = 0; ay < out_w; y += stride_size, ay++) {
+
+                        // For each element in the convolution-filter:
+                        int32_t sum = 0;
+                        for (dim_t fx = 0; fx < KH; fx++) {
+                            for (dim_t fy = 0; fy < KW; fy++) {
+                                int64_t ox = x + fx * dilation;
+                                int64_t oy = y + fy * dilation;
+
+                                // Ignore index access below zero (this is due to padding).
+                                if (ox < 0 || oy < 0 || ox >= ssize_t(H) ||
+                                    oy >= int64_t(W)) {
+                                    continue;
+                                }
+                                for (dim_t fd = 0; fd < inCperG; fd++) {
+
+                                    int32_t F = (int32_t)*(kernel+d*KH*KW*inCperG + fx*KW*inCperG + fy*inCperG + fd);
+                                    int32_t I = (int32_t)*(input+n*H*W*C + ox*W*C + oy*C+ (g*inCperG +fd));
+                                    // We represent the element multiplication with offset as
+                                    // (value - offset).
+                                    sum += (F - kernelOffset) * (I - inputOffset);
+                                }
+                            }
+                        }
+
+                        // Scale the bias to match the scale of the matrix multiplication.
+                        int32_t B =std::round(float(*((int32_t *)bias+d) - biasOffset) *
+                                              (biasScale / matMulScale));
+
+                        // Add the bias.
+                        sum += B;
+
+                        if(doRelu && sum<0){
+                            sum = 0;
+                        }
+                        // Scale the result back to the expected destination scale.
+                        auto out32 = std::round(float(sum) * (matMulScale / outputScale) + outputOffset);
+                        int8_t out8;
+                        if(out32>127) out8=127;
+                        else if(out32<-128) out8=-128;
+                        else out8=(int8_t)out32;
+                        *(output + n*out_h*out_w*KN + ax*out_w*KN + ay*KN + d) = out8;
+                    } // W
+                }   // H
+            }     // C
+        }       // G
+    }         // NS
+    return 0;
+
+}
+
+int cpunonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
+                      int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
+                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
+    dim_t inCperG = C / group;
+    dim_t outCperG = KN / group;
+    float matMulScale = inputScale * kernelScale;
+    for (dim_t n = 0; n < N; n++) {
+        // For each group of input channels:
+        for (dim_t g = 0; g < group; g++) {
+
+            // For each output channel in the group:
+            for (dim_t d = g * outCperG; d < (g + 1) * outCperG; d++) {
+
+                // For each convolution 'jump' in the input tensor:
+                ssize_t x = -ssize_t(pad_size);
+                for (dim_t ax = 0; ax < out_h; x += stride_size, ax++) {
+                    ssize_t y = -ssize_t(pad_size);
+                    for (dim_t ay = 0; ay < out_w; y += stride_size, ay++) {
+
+                        // For each element in the convolution-filter:
+                        int32_t sum = 0;
+                        for (dim_t fx = 0; fx < KH; fx++) {
+                            for (dim_t fy = 0; fy < KW; fy++) {
+                                int64_t ox = x + fx * dilation;
+                                int64_t oy = y + fy * dilation;
+
+                                // Ignore index access below zero (this is due to padding).
+                                if (ox < 0 || oy < 0 || ox >= ssize_t(H) ||
+                                    oy >= int64_t(W)) {
+                                    continue;
+                                }
+                                for (dim_t fd = 0; fd < inCperG; fd++) {
+
+                                    int32_t F = (int32_t)*(kernel+d*KH*KW*inCperG + fx*KW*inCperG + fy*inCperG + fd);
+                                    int32_t I = (int32_t)*(input+n*H*W*C + ox*W*C + oy*C+ (g*inCperG +fd));
+                                    // We represent the element multiplication with offset as
+                                    // (value - offset).
+                                    sum += (F - kernelOffset) * (I - inputOffset);
+                                }
+                            }
+                        }
+
+                        // Scale the bias to match the scale of the matrix multiplication.
+                        int32_t B =std::round(float(*((int32_t *)bias+d) - biasOffset) *
+                                              (biasScale / matMulScale));
+
+                        // Add the bias.
+                        sum += B;
+
+                        if(doRelu && sum<0){
+                            sum = 0;
+                        }
+                        // Scale the result back to the expected destination scale.
+                        int32_t out32 = std::round(float(sum) * (matMulScale / outputScale) + outputOffset);
+                        int8_t out8;
+                        if(out32>127) out8=127;
+                        else if(out32<-128) out8=-128;
+                        else out8=(int8_t)out32;
+                        *(output + n*out_h*out_w*KN + ax*out_w*KN + ay*KN + d) = out8;
+                    } // W
+                }   // H
+            }     // C
+        }       // G
+    }         // NS
+    return 0;
+
+}
+
+
+int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
+                      int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
+                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
+
+  float filterScale = kernelScale;
+  filterScale = 1/filterScale;
+  float inScale = inputScale;
+  inScale = 1/inScale;
+  //float biasScale = biasScale;
+  biasScale = 1/biasScale;
+  float matMulScale = inScale * filterScale;
+  float outScale = outputScale;
+  outScale = 1/outScale;
+  float scale =  matMulScale / outScale;
+  float tempScale = 1.0;
+  assert(scale > 1);
+  uint32_t shift = 0;
+  {
+    while(tempScale<scale)
+    {
+      tempScale *= 2;
+      shift++;
+    }
+  }
+
+  int32_t outOffset = outputOffset;
+  int32_t inOffset = inputOffset;
+  int32_t filterOffset = kernelOffset;
+  //int32_t biasOffset = biasOffset;
+  if(C%16 ==0 && KN%16 ==0 && tempScale==scale && biasScale==matMulScale && outOffset ==0 && inOffset ==0 && filterOffset ==0 && biasOffset ==0) {
+      cpuvtaconvolution(input, inputScale, inputOffset, kernel, kernelScale, kernelOffset,
+                        bias, biasScale, biasOffset, output, outputScale, outputOffset, N, H, W, C, KN, KH, KW, pad_size,
+                        stride_size, group, dilation, doRelu, doBias, out_h, out_w);
+  }
+  else {
+      cpunonvtaconvolution(input, inputScale, inputOffset, kernel, kernelScale, kernelOffset,
+                        bias, 1.0/biasScale, biasOffset, output, outputScale, outputOffset, N, H, W, C, KN, KH, KW, pad_size,
+                        stride_size, group, dilation, doRelu, doBias, out_h, out_w);
+  }
+  return 0;
+}
+
+
+
+int cpuFullyConnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
+                         int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset,
+                      dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias) {
+
+
+    //dim_t inCperG = C / group;
+    //dim_t outCperG = KN / group
+
+    float matMulScale = inputScale * kernelScale;
+
+
+
+    for (dim_t i = 0; i < inputDim0; i++) {
+        for (dim_t j = 0; j < outputDim1; j++) {
+            int32_t sum = 0;
+            for (dim_t k = 0; k < inputDim1; k++) {
+                int32_t W = (int32_t)*(kernel+k*kernelDim1 + j);
+                int32_t A = (int32_t)*(input+i*inputDim1 + k);
+                sum += (W - kernelOffset) * (A - inputOffset);
+            }
+
+            // Scale the bias to match the scale of the matrix multiplication.
+            int32_t B =std::round(float(*((int32_t *)bias+j) - biasOffset) *
+                                  (biasScale / matMulScale));
+
+            // Add the bias.
+            sum += B;
+
+            // Scale the result back to the expected destination scale.
+
+            int32_t out32 = std::round(float(sum) * (matMulScale / outputScale) + outputOffset);
+            int8_t out8;
+            if(out32>127) out8=127;
+            else if(out32<-128) out8=-128;
+            else out8=(int8_t)out32;
+
+            *(output + i*outputDim1 + j) = out8;
+
+        }
+    }
+
+    return 0;
+
+}
+
+
+
+int fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
+                   int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset,
+                   dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias) {
+
+    cpuFullyConnected(input, inputScale, inputOffset, kernel, kernelScale, kernelOffset,
+                         bias, biasScale, biasOffset, output, outputScale, outputOffset,
+                         inputDim0, inputDim1, kernelDim0, kernelDim1, outputDim0, outputDim1, doBias);
+  return 0;
+}
+
+
+int maxpool(int8_t* input, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, unsigned_t KH, unsigned_t KW, unsigned_t pad_size,
+            unsigned_t stride_size){
+
+  dim_t OH = (H+2*pad_size-KH)/stride_size + 1;
+  dim_t OW = (W+2*pad_size-KW)/stride_size + 1;
+
+    // For each input in the batch:
+    for (dim_t n = 0; n < N; n++) {
+
+        // For each layer in the output tensor:
+        for (dim_t z = 0; z < C; z++) {
+            // For each convolution 'jump' in the input tensor:
+            dim_t x = -dim_t(pad_size);
+            for (dim_t ax = 0; ax < OH; x += stride_size, ax++) {
+                dim_t y = -dim_t(pad_size);
+                for (dim_t ay = 0; ay < OW; y += stride_size, ay++) {
+
+                    bool first = true;
+                    int8_t max_value = 0;
+                    dim_t argmaxNHWC = 0;
+
+                    for (dim_t fx = 0; fx < KH; fx++) {
+                        for (dim_t fy = 0; fy < KW; fy++) {
+                            dim_t ox = x + fx;
+                            dim_t oy = y + fy;
+
+                            // Ignore index access below zero (this is due to padding).
+                            if (ox < 0 || oy < 0 || ox >= ssize_t(H) ||
+                                oy >= ssize_t(W)) {
+                                continue;
+                            }
+
+                            int8_t val = *(input + n*H*W*C + ox*W*C + oy*C + z);
+                            if (first || (val >= max_value)) {
+                                first = false;
+                                max_value = val;
+                            }
+                        }
+                    }
+
+                    *(output + n*OH*OW*C + ax*OW*C + ay*C + z) = max_value;
+                } // W
+            }   // H
+        }     // C
+    }       // N
+
+
+  return 0;
+
+}
+
+int relu(int8_t* input, int8_t *output, unsigned_t size, float inputScale, float outputScale){
+  for(int i = 0; i < size; i ++){
+    if(input[i]>0)
+      output[i]=input[i];
+    else
+      output[i]=0;
+    output[i] *= (int)(inputScale/outputScale);
+  }
+
+  return 0;
+}
+
+int avgpool(int8_t* input, float inputScale, int32_t inputOffset, int8_t *output, float outputScale, int32_t outputOffset,
+            dim_t inputDim0, dim_t inputDim1, dim_t inputDim2, dim_t inputDim3,
+            dim_t outputDim0, dim_t outputDim1, dim_t outputDim2, dim_t outputDim3,
+            unsigned_t KH, unsigned_t KW, unsigned_t pad_size, unsigned_t stride_size) {
+
+    dim_t N = inputDim0;
+    dim_t H = inputDim1;
+    dim_t W = inputDim2;
+    dim_t C = inputDim3;
+
+
+    dim_t OH = (H+2*pad_size-KH)/stride_size + 1;
+    dim_t OW = (W+2*pad_size-KW)/stride_size + 1;
+    float filterArea = KH* KW;
+    // For each input in the batch:
+    for (dim_t n = 0; n < N; n++) {
+
+        // For each layer in the output tensor:
+        for (dim_t z = 0; z < C; z++) {
+            // For each convolution 'jump' in the input tensor:
+            dim_t x = -dim_t(pad_size);
+            for (dim_t ax = 0; ax < OH; x += stride_size, ax++) {
+                dim_t y = -dim_t(pad_size);
+                for (dim_t ay = 0; ay < OW; y += stride_size, ay++) {
+
+                    int32_t sum = 0;
+
+
+                    for (dim_t fx = 0; fx < KH; fx++) {
+                        for (dim_t fy = 0; fy < KW; fy++) {
+                            dim_t ox = x + fx;
+                            dim_t oy = y + fy;
+
+                            // Ignore index access below zero (this is due to padding).
+                            if (ox < 0 || oy < 0 || ox >= ssize_t(H) ||
+                                oy >= ssize_t(W)) {
+                                continue;
+                            }
+
+                            sum += *(input + n*H*W*C + ox*W*C + oy*C + z);
+                        }
+                    }
+
+                    int32_t out32 = std::round(float(sum) * (inputScale/ outputScale / filterArea) +
+                               outputOffset);
+                    int8_t out8;
+                    if(out32>127) out8=127;
+                    else if(out32<-128) out8=-128;
+                    else out8=(int8_t)out32;
+                    *(output + n*OH*OW*C + ax*OW*C + ay*C + z) = out8;
+                } // W
+            }   // H
+        }     // C
+    }       // N
+
+
+
+
+  return 0;
+}
+
+int quantize(int8_t *input, int8_t *output, dim_t size, float scale, int32_t offset){
+  float *inputF = (float *)input;
+  for(int i = 0; i < size; i++){
+      float in = *(inputF + i);
+      int32_t out32 = std::round(in/scale + offset);
+      int8_t out8;
+      if(out32>127) out8=127;
+      else if(out32<-128) out8=-128;
+      else out8=(int8_t)out32;
+      *(output+i) = out8;
+  }
+  return 0;
+}
+
+int dequantize(int8_t *input, int8_t *output, dim_t size, float scale, int32_t offset){
+  float* outputF = (float*)output;
+    for(int i = 0; i < size; i++){
+        float in = (float)*(input + i);
+        float out = in*scale + offset;
+        *(outputF+i) = out;
+    }
+
+
+
+  return 0;
+
+
+}
+
+
+int transpose(int8_t *input, int8_t *output, dim_t inDim0, dim_t inDim1, dim_t inDim2, dim_t inDim3,
+              dim_t outDim0, dim_t outDim1, dim_t outDim2, dim_t outDim3,
+              unsigned_t shf0, unsigned_t shf1, unsigned_t shf2, unsigned_t shf3) {
+
+//TODO re-implement
+    return -1;
+}
+
+int elemadd(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+            int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
+  for (dim_t i = 0, e = size; i < e; i++) {
+    int32_t L = input0[i];
+    int32_t R = input1[i];
+
+    // We increase the size of the integer up to 16 bits to prevent overflow.
+    const float largeScale = float(1) / (1 << 15);
+    // Scale both sides from 8-bit to 16-bits.
+    int32_t L32 = std::round(float(L - input0Offset) * (input0Scale / largeScale));
+    int32_t R32 = std::round(float(R - input1Offset) * (input1Scale / largeScale));
+    int32_t sum32 = L32 + R32;
+    sum32 = std::round(float(sum32) * (largeScale / destScale) + destOffset);
+      int8_t out8;
+      if(sum32>127) out8=127;
+      else if(sum32<-128) out8=-128;
+      else out8=(int8_t)sum32;
+    output[i] = out8;
+  }
+  return 0;
+}
+
+
+int elemsub(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+            int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
+  for (dim_t i = 0, e = size; i < e; i++) {
+    int32_t L = input0[i];
+    int32_t R = input1[i];
+
+    float l = (input0Scale / destScale) * float(L - input0Offset);
+    float r = (input1Scale / destScale) * float(R - input1Offset);
+    int32_t sum32 = std::round(l - r + destOffset);
+      int8_t out8;
+      if(sum32>127) out8=127;
+      else if(sum32<-128) out8=-128;
+      else out8=(int8_t)sum32;
+      output[i] = out8;
+  }
+  return 0;
+}
+
+int elemsub_f32(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+            int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
+  for (dim_t i = 0, e = size; i < e; i++) {
+    float L = ((float*)input0)[i];
+    float R = ((float*)input1)[i];
+    ((float*)output)[i] = L - R;
+  }
+  return 0;
+}
+
+
+int elemdiv(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+            int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
+  for (dim_t i = 0, e = size; i < e; i++) {
+    int32_t L = input0[i];
+    int32_t R = input1[i];
+
+    float l = (input0Scale) * float(L - input0Offset);
+    float r = input1Scale * destScale * float(R - input1Offset);
+    int32_t sum32 = std::round(l / r + destOffset);
+      int8_t out8;
+      if(sum32>127) out8=127;
+      else if(sum32<-128) out8=-128;
+      else out8=(int8_t)sum32;
+      output[i] = out8;
+  }
+  return 0;
+}
+
+int elemdiv_f32(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+            int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
+  for (dim_t i = 0, e = size; i < e; i++) {
+    float L = ((float*)input0)[i];
+    float R = ((float*)input1)[i];
+    ((float*)output)[i] = L / R;
+  }
+  return 0;
+}
+
+int splat(int8_t *output, unsigned_t size, int8_t value) {
+  for( int i = 0; i<size; i++ ){
+    output[i]=value;
+  }
+  return 0;
+}
+
+
+int elemmax(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
+            int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
+
+  for (size_t i = 0, e = size; i < e; i++) {
+    float lf, rf;
+    int8_t l, r;
+
+    dequantize(&input0[i],(int8_t *)&lf, 1, input0Scale, input0Offset);
+    dequantize(&input1[i],(int8_t *)&rf, 1, input1Scale, input1Offset);
+
+    quantize((int8_t*)&lf, &l, 1, destScale, destOffset);
+    quantize((int8_t*)&rf, &r, 1, destScale, destOffset);
+
+      output[i] = std::max(l, r);
+  }
+  return 0;
+}
+
+int softmax(int8_t *input, int8_t *output, dim_t inDim0, dim_t inDim1,
+            dim_t outDim0, dim_t outDim1){
+  float *inputP = (float *)input;
+  float *outputP = (float *)output;
+  for (dim_t n = 0; n < inDim0; n++) {
+    // Find Max.
+    float max = inputP[n * inDim0];
+    for (dim_t i = 1; i < inDim1; i++) {
+      max = std::max(max, inputP[n * inDim0 + i]);
+    }
+
+    // Compute exp.
+    float sum = 0;
+    for (dim_t i = 0; i < inDim1; i++) {
+      float e = std::exp(inputP[n * inDim0 + i] - max);
+      sum += e;
+      outputP[n*inDim0 +i] = float(e);
+    }
+    // Normalize the output.
+    for (dim_t i = 0; i < inDim1; i++) {
+      outputP[n*inDim0 +i] =
+          outputP[n*inDim0 +i] / sum;
+    }
+  }
+
+  return 0;
+}
+
+
+void debugprint(int8_t *input, unsigned_t size, std::string filename, bool isInt8 ) {
+  std::ofstream fos(filename, std::ios::binary);
+
+  if(isInt8) {
+    int16_t data16 = 0;
+    for (size_t i = 0, e = size; i < e; i++) {
+      auto data = input[i];
+      if (i % 2 == 0) {
+        data16 = 0xff & data;
+      } else {
+        data16 = data16 | data << 8;
+        fos.write((const char *) &data16, 2);
+      }
+    }
+  }
+  else{
+    int32_t* input_32 = (int32_t*) input;
+    for (size_t i = 0, e = size; i < e; i++) {
+      auto data = input_32[i];
+      fos.write((const char *)&data, 4);
+    }
+  }
+  fos.close();
+}
+
+
+void transpose_nhwc2vtaio(int8_t* input, int8_t* output, int N, int H, int W, int C){
+  int8_t *IN_NHWC = input;
+
+  int8_t *IN_NCHW = (int8_t *)malloc(N*C*H*W);
+  for (int n = 0; n < N; n++) {
+    for (int h = 0; h < H; h++) {
+      for (int w = 0; w < W; w++) {
+        for (int c = 0; c < C; c++) {
+          *(IN_NCHW + n*C*H*W + c*H*W + h*W + w)=*(IN_NHWC + n*H*W*C + h*W*C + w*C + c);
+        }
+      }
+    }
+  }
+
+  // reshape input NCHW -> N{C//16}16HW
+  int8_t *in_NC_16HW = IN_NCHW;
+
+
+  for (int n = 0; n < N; n++) {
+    for (int c_ = 0; c_ < C / 16; c_++) {
+      for (int h = 0; h < H; h++) {
+        for (int w = 0; w < W; w++) {
+          for (int c = 0; c < 16; c++) {
+            *(output + n*(C/16)*H*W*16 + c_*H*W*16 + h*W*16 + w*16 + c) =
+                *(in_NC_16HW + n*(C/16)*16*H*W + c_*16*H*W + c*H*W + h*W + w);
+          }
+        }
+      }
+    }
+  }
+
+  free(IN_NCHW);
+}
+
+void transpose_nhwc2vtak(int8_t* input, int8_t* output, int KN, int KH, int KW, int C){
+  // filter NHWC
+  int8_t *filter_NHWC = input;
+
+  int8_t* filter_N_16HWC_16 = filter_NHWC;
+  // transpose filter {N//16}16HW{C//16}16 =>  {N//16}{C//16}HW1616
+  for (int n_ = 0; n_ < KN / 16; n_++) {
+    for (int c_ = 0; c_ < C / 16; c_++) {
+      for (int h = 0; h < KH; h++) {
+        for (int w = 0; w < KW; w++) {
+          for (int n = 0; n < 16; n++) {
+            for (int c = 0; c < 16; c++) {
+              *(output + n_*(C/16)*KH*KW*16*16 + c_ *KH*KW*16*16 + h*KW*16*16 + w*16*16 + n*16 + c) =
+                  *(filter_N_16HWC_16 + n_*16*KH*KW*C + n*KH*KW*C + h*KW*C + w*C + c_*16 + c);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+void transpose_vtak2nhwc(int8_t* input, int8_t* output, int KN, int KH, int KW, int C){
+  for (int n_ = 0; n_ < KN / 16; n_++) {
+    for (int c_ = 0; c_ < C / 16; c_++) {
+      for (int h = 0; h < KH; h++) {
+        for (int w = 0; w < KW; w++) {
+          for (int n = 0; n < 16; n++) {
+            for (int c = 0; c < 16; c++) {
+              *(output + n_*16*KH*KW*C + n*KH*KW*C + h*KW*C + w*C + c_*16 + c)
+                  = *(input + n_*(C/16)*KH*KW*16*16 + c_ *KH*KW*16*16 + h*KW*16*16 + w*16*16 + n*16 + c);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+
+void transpose_vtaio2nhwc(int8_t* input, int8_t* output, int N, int H, int W, int C){
+  for (int b = 0; b < N; b++) {
+    for (int f = 0; f < C; f++) {
+      for (int i = 0; i < H; i++) {    //h
+        for (int j = 0; j < W; j++) {    //w
+
+          int out_ch = f / 16;
+          int oo = f % 16;
+          auto value =*(input + (out_ch * H * W * 16 + i * W * 16 + j * 16 + oo));
+          *(output + b * H * W * C + i * W * C + j * C + f) = value;
+        }
+      }
+    }
+  }
+}

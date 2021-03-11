@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(vtalib)
 
+option(NESTC_USE_ACL "Use ACL lib for EVTA library" ON)
 INCLUDE_DIRECTORIES(include 3rdparty/dlpack/include)
 INCLUDE_DIRECTORIES(include 3rdparty/dmlc-core/include)
 
@@ -79,24 +80,12 @@ if(NESTC_VTA_RUN_ON_AARCH64)
     add_definitions(-DVTA_RUN_ON_AARCH64)
     add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle_aarch64.cpp)
 else()
-    add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle_x86.cpp)
+    add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle_generic.cpp)
 endif()
 
 target_link_libraries(VTABundle PUBLIC
+        #vta_runtime LLVMSupport pthread glog gflags gomp)
         vta_runtime LLVMSupport pthread glog gflags gomp)
-
-if(NOT NESTC_VTA_RUN_ON_AARCH64)
-
-
-    target_link_libraries(VTABundle PUBLIC
-            QuantizationBase)
-
-    target_link_libraries(VTABundle PUBLIC
-            Support)
-
-    target_link_libraries(VTABundle PUBLIC
-            Base)
-endif()
 
 if(NOT GLOW_WITH_VTASIM)
     target_link_libraries(VTABundle PUBLIC cma)
