@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.10)
 project(vtalib)
 
 option(NESTC_USE_ACL "Use ACL lib for EVTA library" ON)
+option(NESTC_EVTA_LIB_VALIDATION "Validate EVTA library while running" OFF)
+option(NESTC_EVTA_DEBUG "Debug mode for EVTA library" OFF)
+
 INCLUDE_DIRECTORIES(include 3rdparty/dlpack/include)
 INCLUDE_DIRECTORIES(include 3rdparty/dmlc-core/include)
 
@@ -83,6 +86,12 @@ else()
     add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle_generic.cpp)
 endif()
 
+if(NESTC_EVTA_DEBUG)
+    add_definitions(-DVTA_DEBUG_MODE)
+endif()
+if(NESTC_EVTA_LIB_VALIDATION)
+    add_definitions(-DVTA_VALIDATION)
+endif()
 target_link_libraries(VTABundle PUBLIC
         #vta_runtime LLVMSupport pthread glog gflags gomp)
         vta_runtime LLVMSupport pthread glog gflags gomp)

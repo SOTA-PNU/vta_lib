@@ -1395,7 +1395,7 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
       fos.close();
     }
 
-#ifndef VTA_RUN_ON_AARCH64
+#ifdef VTA_VALIDATION
     float nonvtascale = 1.0;
     for (int i = 0; i < shift; i++) {
       nonvtascale *= 2;
