@@ -82,7 +82,20 @@ int cpuvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
                       int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
     dim_t inCperG = C / group;
     dim_t outCperG = KN / group;
+
     float matMulScale = inputScale * kernelScale;
+    float scale =  outputScale / matMulScale;
+    float tempScale = 1.0;
+    assert(scale > 1);
+    uint32_t shift = 0;
+    {
+      while(tempScale<scale)
+      {
+        tempScale *= 2;
+        shift++;
+      }
+    }
+
     for (dim_t n = 0; n < N; n++) {
         // For each group of input channels:
         for (dim_t g = 0; g < group; g++) {
@@ -114,14 +127,13 @@ int cpuvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
                                     int32_t I = (int32_t)*(input+n*H*W*C + ox*W*C + oy*C+ (g*inCperG +fd));
                                     // We represent the element multiplication with offset as
                                     // (value - offset).
-                                    sum += (F - kernelOffset) * (I - inputOffset);
+                                    sum += (F) * (I);
                                 }
                             }
                         }
 
                         // Scale the bias to match the scale of the matrix multiplication.
-                        int32_t B =std::round(float(*((int32_t *)bias+d) - biasOffset) *
-                                              (biasScale / matMulScale));
+                        int32_t B = *((int32_t *)bias+d);
 
                         // Add the bias.
                         sum += B;
@@ -130,7 +142,7 @@ int cpuvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
                             sum = 0;
                         }
                         // Scale the result back to the expected destination scale.
-                        auto out32 = std::round(float(sum) * (matMulScale / outputScale) + outputOffset);
+                        auto out32 = sum >> shift;
                         int8_t out8;
                         if(out32>127) out8=127;
                         else if(out32<-128) out8=-128;
