@@ -307,13 +307,12 @@ void conv_kernel(uint32_t sizeOutTileH,
   }
 
   for (uint32_t filterIdx = 0; filterIdx < KN / nFilterinLoop / nVirtualThread / 16; filterIdx++) {
-    // for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
-
     uint32_t outDummyH = 0;
     uint32_t inDummyH = 0;
     uint32_t outDummyW = 0;
     uint32_t inDummyW = 0;
 
+    uint32_t inputSramPtr = 0;
     if (resizedOutTileH < MIN_H_SIZE) {
       outDummyH = MIN_H_SIZE - resizedOutTileH;
       resizedOutTileH = MIN_H_SIZE;
@@ -328,12 +327,10 @@ void conv_kernel(uint32_t sizeOutTileH,
       inDummyW = resizedInTileW - sizeInTileW;
     }
 
+    // Push operations for resetting Acc memory
     for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
       // acc buffer reset
       uint32_t outputSramBaseAddr = threadIdx * ACC_MEM_ENTRY / nVirtualThread;
-      uint32_t inputSramBaseAddr = threadIdx * (INP_MEM_ENTRY / nVirtualThread);
-      uint32_t weightSramBaseAddr =
-          threadIdx * (WGT_MEM_ENTRY / nVirtualThread);
       ResetAcc reset;
       reset.base_ = outputSramBaseAddr;
       reset.size_ = resizedOutTileH * resizedOutTileW * nFilterinLoop;
@@ -366,6 +363,7 @@ void conv_kernel(uint32_t sizeOutTileH,
                             ? 0
                             : outputHOffset * stride_size - pad_size;
 
+    // Push operations for loading input and weight then gemming
     for (uint32_t channelIdx = 0; channelIdx < numInputChannel / 16;
          channelIdx++) {
       uint32_t src_offset = channelIdx * inputHStride * inputWStride +
@@ -379,22 +377,30 @@ void conv_kernel(uint32_t sizeOutTileH,
           ? inputWStride - inputWOffset
           : resizedInTileW - x_pad_before;
 
+      uint32_t inputSramBaseAddr = 0;
+      if(inputSramPtr==0){
+        inputSramPtr = INP_MEM_ENTRY / 2;
+        inputSramBaseAddr = inputSramPtr;
+      }
+      else
+        inputSramPtr = 0;
+
       for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
         uint32_t filter_offset =
             filterIdx * nVirtualThread * nFilterinLoop * (numInputChannel / 16) * KH * KW +
             threadIdx * nFilterinLoop * (numInputChannel / 16) * KH * KW +
             channelIdx * KH * KW;
-        uint32_t inputSramBaseAddr =
-            threadIdx * (INP_MEM_ENTRY / nVirtualThread);
+
         uint32_t weightSramBaseAddr =
             threadIdx * (WGT_MEM_ENTRY / nVirtualThread);
         VTADepPop(vtaCmdH, 2, 1);
-        VTALoadBuffer2D(vtaCmdH, vta_input_buf, src_offset, x_size, y_size,
-                        inputWStride, x_pad_before, y_pad_before,
-                        resizedInTileW - x_pad_before - x_size,
-                        resizedInTileH - y_pad_before - y_size,
-                        inputSramBaseAddr, // index
-                        2);                // type
+        if(threadIdx==0)
+          VTALoadBuffer2D(vtaCmdH, vta_input_buf, src_offset, x_size, y_size,
+                          inputWStride, x_pad_before, y_pad_before,
+                          resizedInTileW - x_pad_before - x_size,
+                          resizedInTileH - y_pad_before - y_size,
+                          inputSramBaseAddr, // index
+                          2);                // type
 
         VTALoadBuffer2D(vtaCmdH, vta_filter_buf, filter_offset, KH * KW,
                         nFilterinLoop, KH * KW * numInputChannel / 16, 0, 0, 0,
@@ -405,8 +411,6 @@ void conv_kernel(uint32_t sizeOutTileH,
 
         uint32_t outputSramBaseAddr =
             threadIdx * ACC_MEM_ENTRY / nVirtualThread;
-        uint32_t inputSramBaseAddr =
-            threadIdx * (INP_MEM_ENTRY / nVirtualThread);
         uint32_t weightSramBaseAddr =
             threadIdx * (WGT_MEM_ENTRY / nVirtualThread);
         VTADepPop(vtaCmdH, 1, 2);
@@ -450,10 +454,12 @@ void conv_kernel(uint32_t sizeOutTileH,
         VTADepPush(vtaCmdH, 2, 1);
       }
     }
-    for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
 
+    for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
       VTADepPop(vtaCmdH, 2, 1);
     }
+
+    // Push operations for adding bias, shifting and relu
     for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
 
       uint32_t outputSramBaseAddr = threadIdx * ACC_MEM_ENTRY / nVirtualThread;
@@ -593,6 +599,7 @@ void conv_kernel(uint32_t sizeOutTileH,
       VTADepPush(vtaCmdH, 2, 3);
     }
 
+    // Push operations for storing the results
     for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
 
       uint32_t outputSramBaseAddr = threadIdx * ACC_MEM_ENTRY / nVirtualThread;
