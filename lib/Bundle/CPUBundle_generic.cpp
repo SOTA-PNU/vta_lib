@@ -133,10 +133,12 @@ int cpuvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
                         }
 
                         // Scale the bias to match the scale of the matrix multiplication.
-                        int32_t B = *((int32_t *)bias+d);
+                        if(doBias){
+                          int32_t B = *((int32_t *)bias+d);
 
-                        // Add the bias.
-                        sum += B;
+                          // Add the bias.
+                          sum += B;
+                        }
 
                         if(doRelu && sum<0){
                             sum = 0;
