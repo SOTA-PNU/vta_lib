@@ -10,12 +10,12 @@ INCLUDE_DIRECTORIES(include 3rdparty/dlpack/include)
 INCLUDE_DIRECTORIES(include 3rdparty/dmlc-core/include)
 
 if(NOT NESTC_EVTA_RUN_ON_ZCU102)
-    add_definitions(-DGLOW_WITH_VTASIM=1)
+    add_definitions(-DNESTC_USE_VTASIM=1)
     INCLUDE_DIRECTORIES(include include/simulator)
     add_library(vta_runtime lib/simulator/runtime.cc lib/simulator/sim_driver.cc lib/simulator/virtual_memory.cc lib/simulator/sim_tlpp.cc)
     add_subdirectory(tests/simtests)
 else()
-    add_definitions(-DGLOW_WITH_VTASIM=0)
+    add_definitions(-DNESTC_USE_VTASIM=0)
     add_definitions(-DDMLC_USE_FOPEN64=0
             -DVTA_TARGET=zcu102
             -DVTA_HW_VER=0.0.1
@@ -97,6 +97,6 @@ target_link_libraries(VTABundle PUBLIC
         #vta_runtime LLVMSupport pthread glog gflags gomp)
         vta_runtime LLVMSupport pthread glog gflags gomp)
 
-if(NOT GLOW_WITH_VTASIM)
+if(NOT NESTC_USE_VTASIM)
     target_link_libraries(VTABundle PUBLIC cma)
 endif()

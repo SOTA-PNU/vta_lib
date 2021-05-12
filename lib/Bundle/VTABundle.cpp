@@ -8,7 +8,7 @@
 #include <cassert>
 #include "llvm/ADT/ArrayRef.h"
 
-#if(GLOW_WITH_VTASIM)
+#if(NESTC_USE_VTASIM)
 #include "vta/vtalib/include/simulator/runtime.h"
 #else
 #include "vta/vtalib/include/zcu102/vta/runtime.h"
@@ -26,7 +26,7 @@ using namespace std;
 
 
 void xlnk_reset() {
-#if(!(GLOW_WITH_VTASIM==1))
+#if(!(NESTC_USE_VTASIM==1))
   int xlnkfd = open("/dev/xlnk", O_RDWR | O_CLOEXEC);
   if (xlnkfd < 0) {
     printf("Reset failed - could not open device: %d\n", xlnkfd);

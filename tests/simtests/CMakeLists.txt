@@ -14,7 +14,7 @@ add_executable(VTABackendSimulatorTest
 target_link_libraries(VTABackendSimulatorTest gtest VTASimTest)
 set_target_properties( VTABackendSimulatorTest
         PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${GLOW_BINARY_DIR}/tests"
+        RUNTIME_OUTPUT_DIRECTORY "${NESTC_BINARY_DIR}/tests"
         )
 
 
