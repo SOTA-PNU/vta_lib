@@ -75,13 +75,13 @@ TVM_DLL void* VTABufferGetVirtAddr(const void* buffer);
 typedef void* VTACommandHandle;
 
 /*! \brief Shutdown hook of VTA to cleanup resources */
-TVM_DLL void VTARuntimeShutdown();
+TVM_DLL void VTARuntimeShutdown(uint32_t index);
 
 /*!
  * \brief Get thread local command handle.
  * \return A thread local command handle.
  */
-TVM_DLL VTACommandHandle VTATLSCommandHandle();
+TVM_DLL VTACommandHandle VTATLSCommandHandle(uint32_t index);
 
 /*!
  * \brief Get the buffer access pointer on CPU.
@@ -207,7 +207,8 @@ TVM_DLL void VTAStoreBuffer2D(VTACommandHandle cmd,
  * \param use_imm Use immediate in ALU mode if set to true.
  * \param imm_val Immediate value in ALU mode.
  */
-TVM_DLL void VTAUopPush(uint32_t mode,
+TVM_DLL void VTAUopPush(VTACommandHandle cmdH,
+                        uint32_t mode,
                         uint32_t reset_out,
                         uint32_t dst_index,
                         uint32_t src_index,
@@ -223,7 +224,8 @@ TVM_DLL void VTAUopPush(uint32_t mode,
  * \param src_factor The input factor.
  * \param wgt_factor The weight factor.
  */
-TVM_DLL void VTAUopLoopBegin(uint32_t extent,
+TVM_DLL void VTAUopLoopBegin(VTACommandHandle cmdH,
+                             uint32_t extent,
                              uint32_t dst_factor,
                              uint32_t src_factor,
                              uint32_t wgt_factor);
@@ -231,7 +233,7 @@ TVM_DLL void VTAUopLoopBegin(uint32_t extent,
 /*!
  * \brief Mark end of a micro op loop.
  */
-TVM_DLL void VTAUopLoopEnd();
+TVM_DLL void VTAUopLoopEnd(VTACommandHandle cmdH);
 
 /*!
  * \brief Push GEMM uop kernel into the command handle.
@@ -241,7 +243,8 @@ TVM_DLL void VTAUopLoopEnd();
  * \param nbytes Number of bytes to in the closure arguments.
  * \return 0 if success.
  */
-TVM_DLL int VTAPushGEMMOp(void** uop_handle,
+TVM_DLL int VTAPushGEMMOp(VTACommandHandle cmdH,
+                          void** uop_handle,
                           int (*finit)(void*),
                           void* signature,
                           int nbytes);
@@ -254,7 +257,8 @@ TVM_DLL int VTAPushGEMMOp(void** uop_handle,
  * \param nbytes Number of bytes to in the closure arguments.
  * \return 0 if success.
  */
-TVM_DLL int VTAPushALUOp(void** uop_handle,
+TVM_DLL int VTAPushALUOp(VTACommandHandle cmdH,
+                         void** uop_handle,
                          int (*finit)(void*),
                          void* signature,
                          int nbytes);

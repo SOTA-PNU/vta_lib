@@ -15,59 +15,75 @@
 
 using namespace std;
 
+#define EVTA_ID 0
 
 
 namespace sim_test_conv1 {
+
+struct alu_param{
+  VTACommandHandle *cmdH;
+  int param;
+};
+
 int finit_gemmop_init(void *param) {
   // p = oc
   int *p = (int *) param;
-  VTAUopLoopBegin(14, 14, 0, 0);
-  VTAUopLoopBegin(14, 1, 0, 0);
+  VTACommandHandle *cmdH = (VTACommandHandle*) param;
+  VTAUopLoopBegin(*cmdH, 14, 14, 0, 0);
+  VTAUopLoopBegin(*cmdH, 14, 1, 0, 0);
   //for(int j=0;j<14;j++) { // w,h
-  VTAUopPush(0, 1, 0, 0, 0, 0, 0, 0);
+  VTAUopPush(*cmdH, 0, 1, 0, 0, 0, 0, 0, 0);
   //VTAUopPush(0,1,j,0,0,0,0,0);
   //}
-  VTAUopLoopEnd();
-  VTAUopLoopEnd();
+  VTAUopLoopEnd(*cmdH);
+  VTAUopLoopEnd(*cmdH);
   return 0;
 }
 
 int finit_gemmop_3x3(void *param) {
-  VTAUopLoopBegin(14, 14, 16, 0);
-  VTAUopLoopBegin(3, 0, 16, 3);
+
+  VTACommandHandle *cmdH = (VTACommandHandle*) param;
+  VTAUopLoopBegin(*cmdH, 14, 14, 16, 0);
+  VTAUopLoopBegin(*cmdH, 3, 0, 16, 3);
   for (int dx = 0; dx < 3; dx++) {
     for (int j = 0; j < 14; j++) {
-      VTAUopPush(0, 0, j, (j + dx), dx, 0, 0, 0);
+      VTAUopPush(*cmdH, 0, 0, j, (j + dx), dx, 0, 0, 0);
     }
   }
-  VTAUopLoopEnd();
-  VTAUopLoopEnd();
+  VTAUopLoopEnd(*cmdH);
+  VTAUopLoopEnd(*cmdH);
   return 0;
 }
 
 // alu func
 int finit_shr(void *param) {
-  int *p = (int *) (param);
-  VTAUopLoopBegin(*p, 1, 1, 0);
-  VTAUopPush(1, 0, 0, 0, 0, 3, 1, 8);
+  struct alu_param * params = (struct alu_param*) param;
+  VTACommandHandle *cmdH = params->cmdH;
+  int p = params->param;
+  VTAUopLoopBegin(*cmdH, p, 1, 1, 0);
+  VTAUopPush(*cmdH, 1, 0, 0, 0, 0, 3, 1, 8);
   //VTAUopPush(1, 0, 0, 0, 0, 3, 1, 7); // input 5. output 7. 12shift
-  VTAUopLoopEnd();
+  VTAUopLoopEnd(*cmdH);
   return 0;
 }
 
 int finit_max(void *param) {
-  int *p = (int *) (param);
-  VTAUopLoopBegin(*p, 1, 1, 0);
-  VTAUopPush(1, 0, 0, 0, 0, 1, 1, 0);
-  VTAUopLoopEnd();
+  struct alu_param * params = (struct alu_param*) param;
+  VTACommandHandle *cmdH = params->cmdH;
+  int p = params->param;
+  VTAUopLoopBegin(*cmdH, p, 1, 1, 0);
+  VTAUopPush(*cmdH, 1, 0, 0, 0, 0, 1, 1, 0);
+  VTAUopLoopEnd(*cmdH);
   return 0;
 }
 
 int finit_min(void *param) {
-  int *p = (int *) (param);
-  VTAUopLoopBegin(*p, 1, 1, 0);
-  VTAUopPush(1, 0, 0, 0, 0, 0, 1, 127);
-  VTAUopLoopEnd();
+  struct alu_param * params = (struct alu_param*) param;
+  VTACommandHandle *cmdH = params->cmdH;
+  int p = params->param;
+  VTAUopLoopBegin(*cmdH, p, 1, 1, 0);
+  VTAUopPush(*cmdH, 1, 0, 0, 0, 0, 0, 1, 127);
+  VTAUopLoopEnd(*cmdH);
   return 0;
 }
 }
@@ -165,7 +181,7 @@ int conv1_test(){
         uopHandle5[0]=nullptr;
 
         VTACommandHandle vtaCmdH{nullptr};
-        vtaCmdH = VTATLSCommandHandle();
+        vtaCmdH = VTATLSCommandHandle(EVTA_ID);
         //VTASetDebugMode(vtaCmdH,VTA_DEBUG_DUMP_INSN | VTA_DEBUG_DUMP_UOP);
         VTASetDebugMode(vtaCmdH,0);
 
@@ -241,7 +257,7 @@ int conv1_test(){
                     VTADepPop(vtaCmdH,3,2);
                     // 초기화
                     // 초기화는 oc, ic비교안해도됨. 무조건 oc가 큼
-                    VTAPushGEMMOp(uopHandle1,&sim_test_conv1::finit_gemmop_init, &oc,0);
+                    VTAPushGEMMOp(vtaCmdH, uopHandle1,&sim_test_conv1::finit_gemmop_init, &vtaCmdH,0);
 
                     VTADepPush(vtaCmdH,2,1);
                     //for(int ic_out=0;ic_out < ic;ic_out++) {
@@ -276,20 +292,22 @@ int conv1_test(){
 
                         VTADepPush(vtaCmdH,1,2);
                         VTADepPop(vtaCmdH,1,2);
-
-                        VTAPushGEMMOp(uopHandle2,&sim_test_conv1::finit_gemmop_3x3,&oc,0);
+                        VTAPushGEMMOp(vtaCmdH, uopHandle2,&sim_test_conv1::finit_gemmop_3x3,&vtaCmdH,0);
 
                         VTADepPush(vtaCmdH,2,1);
 //                    }
                     VTADepPop(vtaCmdH,2,1);
 
                     //param_alu = oc * 98;
-                    int param_alu = 196;
+                    //int param_alu = 196;
+                    struct alu_param param_alu;
+                    param_alu.cmdH = &vtaCmdH;
+                    param_alu.param = 196;
 
 
-                    VTAPushALUOp(uopHandle3,&sim_test_conv1::finit_shr,&param_alu,0);
-                    VTAPushALUOp(uopHandle4,&sim_test_conv1::finit_max,&param_alu,0);
-                    VTAPushALUOp(uopHandle5,&sim_test_conv1::finit_min,&param_alu,0);
+                    VTAPushALUOp(vtaCmdH, uopHandle3,&sim_test_conv1::finit_shr,&param_alu,0);
+                    VTAPushALUOp(vtaCmdH, uopHandle4,&sim_test_conv1::finit_max,&param_alu,0);
+                    VTAPushALUOp(vtaCmdH, uopHandle5,&sim_test_conv1::finit_min,&param_alu,0);
 
                     VTADepPush(vtaCmdH,2,3);
                     VTADepPop(vtaCmdH,2,3);
@@ -322,7 +340,7 @@ int conv1_test(){
         VTASynchronize(vtaCmdH,1<<31);
         VTABufferCopy(RES_buf, 0, output_data8, 0, out_h*out_w*filter_size, 2);  // 1 MemCopyToHost
 
-        VTARuntimeShutdown();
+        VTARuntimeShutdown(EVTA_ID);
 
         // end case
         VTABufferFree( DATA_buf );

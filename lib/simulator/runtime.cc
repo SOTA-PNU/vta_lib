@@ -35,7 +35,7 @@
 #include <vector>
 #include <memory>
 
-#include <runtime.h>
+#include <vta/runtime.h>
 
 namespace vta {
 
@@ -1151,6 +1151,8 @@ class CommandQueue {
 
   // Get record kernel
   UopKernel* record_kernel() const {
+    if(record_kernel_ == nullptr)
+      printf("hihi");
     CHECK(record_kernel_ != nullptr);
     return record_kernel_;
   }
@@ -1204,17 +1206,38 @@ class CommandQueue {
     this->CheckInsnOverFlow();
   }
 
-  static std::shared_ptr<CommandQueue>& ThreadLocal() {
-    static std::shared_ptr<CommandQueue> inst =
+  static std::shared_ptr<CommandQueue>& ThreadLocal(uint32_t index) {
+    static std::shared_ptr<CommandQueue> inst0 =
         std::make_shared<CommandQueue>();
-    if (inst == nullptr) {
-      inst = std::make_shared<CommandQueue>();
+    static std::shared_ptr<CommandQueue> inst1 =
+        std::make_shared<CommandQueue>();
+    static std::shared_ptr<CommandQueue> inst2 =
+        std::make_shared<CommandQueue>();
+    static std::shared_ptr<CommandQueue> inst3 =
+        std::make_shared<CommandQueue>();
+
+    if (inst0 == nullptr) {
+      inst0 = std::make_shared<CommandQueue>();
     }
-    return inst;
+    if (inst1 == nullptr) {
+      inst1 = std::make_shared<CommandQueue>();
+    }
+    if (inst2 == nullptr) {
+      inst2 = std::make_shared<CommandQueue>();
+    }
+    if (inst3 == nullptr) {
+      inst3 = std::make_shared<CommandQueue>();
+    }
+
+    if(index==0) return inst0;
+    if(index==1) return inst1;
+    if(index==2) return inst2;
+    if(index==3) return inst3;
+    return inst0;
   }
 
-  static void Shutdown() {
-    ThreadLocal().reset();
+  static void Shutdown(uint32_t index) {
+    ThreadLocal(index).reset();
   }
 
  private:
@@ -1372,12 +1395,12 @@ void* VTABufferGetVirtAddr(const void* buffer) {
   from_buffer = vta::DataBuffer::FromHandle(buffer);
   return from_buffer->virt_addr();
 }
-VTACommandHandle VTATLSCommandHandle() {
-  return vta::CommandQueue::ThreadLocal().get();
+VTACommandHandle VTATLSCommandHandle(uint32_t index) {
+  return vta::CommandQueue::ThreadLocal(index).get();
 }
 
-void VTARuntimeShutdown() {
-  vta::CommandQueue::Shutdown();
+void VTARuntimeShutdown(uint32_t index) {
+  vta::CommandQueue::Shutdown(index);
 }
 
 void VTASetDebugMode(VTACommandHandle cmd, int debug_flag) {
@@ -1441,7 +1464,8 @@ void VTAStoreBuffer2D(VTACommandHandle cmd,
                     x_size, y_size, x_stride);
 }
 
-void VTAUopPush(uint32_t mode,
+void VTAUopPush(VTACommandHandle cmdH,
+                uint32_t mode,
                 uint32_t reset_out,
                 uint32_t dst_index,
                 uint32_t src_index,
@@ -1449,38 +1473,41 @@ void VTAUopPush(uint32_t mode,
                 uint32_t opcode,
                 uint32_t use_imm,
                 int32_t imm_val) {
-  vta::CommandQueue::ThreadLocal()->record_kernel()
+  static_cast<vta::CommandQueue*>(cmdH)->record_kernel()
       ->Push(mode, reset_out, dst_index, src_index,
              wgt_index, opcode, use_imm, imm_val);
 }
 
-void VTAUopLoopBegin(uint32_t extent,
+void VTAUopLoopBegin(VTACommandHandle cmdH,
+                     uint32_t extent,
                      uint32_t dst_factor,
                      uint32_t src_factor,
                      uint32_t wgt_factor) {
-  vta::CommandQueue::ThreadLocal()->record_kernel()
+  static_cast<vta::CommandQueue*>(cmdH)->record_kernel()
       ->PushLoopBegin(extent, dst_factor, src_factor, wgt_factor);
 }
 
-void VTAUopLoopEnd() {
-  vta::CommandQueue::ThreadLocal()->record_kernel()
+void VTAUopLoopEnd(VTACommandHandle cmdH) {
+  static_cast<vta::CommandQueue*>(cmdH)->record_kernel()
       ->PushLoopEnd();
 }
 
-int VTAPushGEMMOp(void** uop_handle,
+int VTAPushGEMMOp(VTACommandHandle cmdH,
+                  void** uop_handle,
                   int (*finit)(void*),
                   void* signature,
                   int nbytes) {
-  vta::CommandQueue::ThreadLocal()->
+  static_cast<vta::CommandQueue*>(cmdH)->
       PushGEMMOp(uop_handle, finit, signature, nbytes);
   return 0;
 }
 
-int VTAPushALUOp(void** uop_handle,
+int VTAPushALUOp(VTACommandHandle cmdH,
+                 void** uop_handle,
                  int (*finit)(void*),
                  void* signature,
                  int nbytes) {
-  vta::CommandQueue::ThreadLocal()->
+  static_cast<vta::CommandQueue*>(cmdH)->
       PushALUUop(uop_handle, finit, signature, nbytes);
   return 0;
 }

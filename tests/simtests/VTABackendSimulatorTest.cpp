@@ -6,7 +6,7 @@ TEST(VTABackendSimulatorTest, VTA_CONV1_TEST) {
     EXPECT_EQ(0,conv1_test());
 }
 
-
+/*
 TEST(VTABackendSimulatorTest, VTA_CONV_2LAYER_TEST) {
     EXPECT_EQ(0,conv_2layer_test());
 }
@@ -96,6 +96,8 @@ TEST(VTABackendSimulatorTest, VTA_CONV19_TEST) {
 TEST(VTABackendSimulatorTest, VTA_CONV20_TEST) {
   EXPECT_EQ(0,conv20_test());
 }
+
+ */
 TEST(VTABackendSimulatorTest, VTA_CONV21_TEST) {
   EXPECT_EQ(0,conv21_test());
 }
