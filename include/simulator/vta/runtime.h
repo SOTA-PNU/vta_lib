@@ -75,13 +75,13 @@ TVM_DLL void* VTABufferGetVirtAddr(const void* buffer);
 typedef void* VTACommandHandle;
 
 /*! \brief Shutdown hook of VTA to cleanup resources */
-TVM_DLL void VTARuntimeShutdown(uint32_t index);
+TVM_DLL void VTARuntimeShutdown(uint32_t index = 0);
 
 /*!
  * \brief Get thread local command handle.
  * \return A thread local command handle.
  */
-TVM_DLL VTACommandHandle VTATLSCommandHandle(uint32_t index);
+TVM_DLL VTACommandHandle VTATLSCommandHandle(uint32_t index = 0);
 
 /*!
  * \brief Get the buffer access pointer on CPU.

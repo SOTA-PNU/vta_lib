@@ -292,6 +292,7 @@ void conv_kernel(uint32_t sizeOutTileH,
                  bool bias,
                  void *vta_bias_buf,
                  VTACommandHandle& vtaCmdH,
+                 uint32_t idEVTA = 0,
                  uint32_t nVirtualThread = 1) {
 
   uint32_t resizedOutTileH = (sizeInTileH-KH) / stride_size + 1;
@@ -349,7 +350,7 @@ void conv_kernel(uint32_t sizeOutTileH,
       void **uopHandle_reset;
 
       bool isFound = false;
-      for(auto resetUOpHandle : vResetUopHandle[EVTA_ID]){
+      for(auto resetUOpHandle : vResetUopHandle[idEVTA]){
         if(resetUOpHandle->strReset==reset){
           uopHandle_reset = resetUOpHandle->uopHandle_reset;
           isFound = true;
@@ -360,7 +361,7 @@ void conv_kernel(uint32_t sizeOutTileH,
         auto newHandle = new ResetUopHandle();
         newHandle->strReset = reset;
         uopHandle_reset = newHandle->uopHandle_reset;
-        vResetUopHandle[EVTA_ID].push_back(newHandle);
+        vResetUopHandle[idEVTA].push_back(newHandle);
       }
 
       VTAPushGEMMOp(vtaCmdH, uopHandle_reset, &reset_acc, &reset, 0);
@@ -437,7 +438,7 @@ void conv_kernel(uint32_t sizeOutTileH,
         void **uopHandle_gemm;
 
         bool isFound = false;
-        for(auto gemmUOpHandle : vGemmUOpHandle[EVTA_ID]){
+        for(auto gemmUOpHandle : vGemmUOpHandle[idEVTA]){
           if(gemmUOpHandle->strGemm==gemm_ctx){
             uopHandle_gemm = gemmUOpHandle->uopHandle_gemm;
             isFound = true;
@@ -448,7 +449,7 @@ void conv_kernel(uint32_t sizeOutTileH,
           auto newHandle = new GemmUOpHandle();
           newHandle->strGemm = gemm_ctx;
           uopHandle_gemm = newHandle->uopHandle_gemm;
-          vGemmUOpHandle[EVTA_ID].push_back(newHandle);
+          vGemmUOpHandle[idEVTA].push_back(newHandle);
         }
 
 
@@ -486,7 +487,7 @@ void conv_kernel(uint32_t sizeOutTileH,
         void **uopHandle_add;
 
         bool isFound = false;
-        for(auto addUOpHandle : vAddUOpHandle[EVTA_ID]){
+        for(auto addUOpHandle : vAddUOpHandle[idEVTA]){
           if(addUOpHandle->strAdd==add_ctx){
             uopHandle_add = addUOpHandle->uopHandle_add;
             isFound = true;
@@ -497,7 +498,7 @@ void conv_kernel(uint32_t sizeOutTileH,
           auto newHandle = new AddUopHandle();
           newHandle->strAdd = add_ctx;
           uopHandle_add = newHandle->uopHandle_add;
-          vAddUOpHandle[EVTA_ID].push_back(newHandle);
+          vAddUOpHandle[idEVTA].push_back(newHandle);
         }
 
         VTAPushALUOp(vtaCmdH, uopHandle_add, &alu_add, &add_ctx, 0);
@@ -513,7 +514,7 @@ void conv_kernel(uint32_t sizeOutTileH,
         void **uopHandle_shift;
 
         bool isFound = false;
-        for (auto shiftUOpHandle : vShiftUopHandle[EVTA_ID]) {
+        for (auto shiftUOpHandle : vShiftUopHandle[idEVTA]) {
           if (shiftUOpHandle->strShift == shift_ctx) {
             uopHandle_shift = shiftUOpHandle->uopHandle_shift;
             isFound = true;
@@ -524,7 +525,7 @@ void conv_kernel(uint32_t sizeOutTileH,
           auto newHandle = new ShiftUopHandle();
           newHandle->strShift = shift_ctx;
           uopHandle_shift = newHandle->uopHandle_shift;
-          vShiftUopHandle[EVTA_ID].push_back(newHandle);
+          vShiftUopHandle[idEVTA].push_back(newHandle);
         }
 
         VTAPushALUOp(vtaCmdH, uopHandle_shift, &alu_shr, &shift_ctx, 0);
@@ -539,7 +540,7 @@ void conv_kernel(uint32_t sizeOutTileH,
           void **uopHandle_reset;
 
           bool isFound = false;
-          for (auto resetUOpHandle : vMaxUopHandle[EVTA_ID]) {
+          for (auto resetUOpHandle : vMaxUopHandle[idEVTA]) {
             if (resetUOpHandle->strReset == alu_ctx) {
               uopHandle_reset = resetUOpHandle->uopHandle_reset;
               isFound = true;
@@ -550,7 +551,7 @@ void conv_kernel(uint32_t sizeOutTileH,
             auto newHandle = new ResetUopHandle();
             newHandle->strReset = alu_ctx;
             uopHandle_reset = newHandle->uopHandle_reset;
-            vMaxUopHandle[EVTA_ID].push_back(newHandle);
+            vMaxUopHandle[idEVTA].push_back(newHandle);
           }
           VTAPushALUOp(vtaCmdH, uopHandle_reset, &alu_max, &alu_ctx, 0);
         } else {
@@ -561,7 +562,7 @@ void conv_kernel(uint32_t sizeOutTileH,
           void **uopHandle_reset;
 
           bool isFound = false;
-          for (auto resetUOpHandle : vReluUopHandle[EVTA_ID]) {
+          for (auto resetUOpHandle : vReluUopHandle[idEVTA]) {
             if (resetUOpHandle->strReset == alu_ctx) {
               uopHandle_reset = resetUOpHandle->uopHandle_reset;
               isFound = true;
@@ -572,7 +573,7 @@ void conv_kernel(uint32_t sizeOutTileH,
             auto newHandle = new ResetUopHandle();
             newHandle->strReset = alu_ctx;
             uopHandle_reset = newHandle->uopHandle_reset;
-            vReluUopHandle[EVTA_ID].push_back(newHandle);
+            vReluUopHandle[idEVTA].push_back(newHandle);
           }
           VTAPushALUOp(vtaCmdH, uopHandle_reset, &alu_relu, &alu_ctx, 0);
         }
@@ -585,7 +586,7 @@ void conv_kernel(uint32_t sizeOutTileH,
         void **uopHandle_reset;
 
         bool isFound = false;
-        for (auto resetUOpHandle : vMinUopHandle[EVTA_ID]) {
+        for (auto resetUOpHandle : vMinUopHandle[idEVTA]) {
           if (resetUOpHandle->strReset == alu_ctx) {
             uopHandle_reset = resetUOpHandle->uopHandle_reset;
             isFound = true;
@@ -596,7 +597,7 @@ void conv_kernel(uint32_t sizeOutTileH,
           auto newHandle = new ResetUopHandle();
           newHandle->strReset = alu_ctx;
           uopHandle_reset = newHandle->uopHandle_reset;
-          vMinUopHandle[EVTA_ID].push_back(newHandle);
+          vMinUopHandle[idEVTA].push_back(newHandle);
         }
         VTAPushALUOp(vtaCmdH, uopHandle_reset, &alu_min, &alu_ctx, 0);
       }
@@ -868,6 +869,7 @@ int conv21_test() {
                     doBias,
                     vta_bias_buf,
                     vtaCmdH,
+                    EVTA_ID,
                     NTHREAD
 
         );
@@ -903,6 +905,7 @@ int conv21_test() {
                     doBias,
                     vta_bias_buf,
                     vtaCmdH,
+                    EVTA_ID,
                     NTHREAD
         );
       }
