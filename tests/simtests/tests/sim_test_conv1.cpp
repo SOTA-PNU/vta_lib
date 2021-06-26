@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 
-#include <runtime.h>
+#include <vta/runtime.h>
 
 #include <time.h>
 

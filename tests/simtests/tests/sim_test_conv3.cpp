@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <assert.h>
-#include <runtime.h>
+#include <vta/runtime.h>
 
 #include <time.h>
 
