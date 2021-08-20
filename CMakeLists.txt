@@ -10,11 +10,13 @@ INCLUDE_DIRECTORIES(include 3rdparty/dlpack/include)
 INCLUDE_DIRECTORIES(include 3rdparty/dmlc-core/include)
 
 if(NOT NESTC_EVTA_RUN_ON_ZCU102)
+    message(STATUS "VTALIB with Simulator")
     add_definitions(-DNESTC_USE_VTASIM=1)
-    INCLUDE_DIRECTORIES(include include/simulator)
+    INCLUDE_DIRECTORIES(include include/simulator include/simulator/vta)
     add_library(vta_runtime lib/simulator/runtime.cc lib/simulator/sim_driver.cc lib/simulator/virtual_memory.cc lib/simulator/sim_tlpp.cc)
     add_subdirectory(tests/simtests)
 else()
+    message(STATUS "VTALIB with ZCU102")
     add_definitions(-DNESTC_USE_VTASIM=0)
     add_definitions(-DDMLC_USE_FOPEN64=0
             -DVTA_TARGET=zcu102

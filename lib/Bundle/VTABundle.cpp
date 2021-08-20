@@ -9,7 +9,7 @@
 #include "llvm/ADT/ArrayRef.h"
 
 #if(NESTC_USE_VTASIM)
-#include "vta/vtalib/include/simulator/runtime.h"
+#include "runtime.h"
 #else
 #include "vta/vtalib/include/zcu102/vta/runtime.h"
 #endif

@@ -430,8 +430,9 @@ int main(){
 
             int8_t v = *(output_data8+(out_ch*out_h*out_w*16 + i*out_w*16 + j*16 + oo));
 
-            printf("NCHW:%d|%d|%d|%d    %d, %d\n", b,f,i,j,(int8_t)v, result[b][i][j][f]);
-            if ((uint8_t)v != result[b][i][j][f]){
+
+            if ((int8_t)v != result[b][i][j][f]){
+              printf("NCHW:%d|%d|%d|%d    %d, %d\n", b,f,i,j,(int8_t)v, result[b][i][j][f]);
               is_diff = -1;
               return -1;
             }
