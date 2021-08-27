@@ -1,5 +1,6 @@
 FILE(GLOB testfiles "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp")
 foreach(object ${testfiles})
+    add_compile_options(-fpermissive)
     get_filename_component(obj ${object} NAME_WE )
     message(STATUS "zcu102 test ${obj} is added")
     add_executable(${obj} ${object})

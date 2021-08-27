@@ -70,12 +70,14 @@ void *VTAMapRegister(uint32_t addr) {
   uint32_t virt_offset = addr - virt_base;
   // Open file and mmap
   uint32_t mmap_file = open("/dev/mem", O_RDWR|O_SYNC);
-  return mmap(NULL,
+  void* rtn =  mmap(NULL,
               (VTA_IP_REG_MAP_RANGE + virt_offset),
               PROT_READ|PROT_WRITE,
               MAP_SHARED,
               mmap_file,
               virt_base);
+  close(mmap_file);
+  return rtn;
 }
 
 void VTAUnmapRegister(void *vta) {
