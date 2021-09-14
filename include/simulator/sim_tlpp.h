@@ -33,6 +33,10 @@
 #include <cassert>
 #include <queue>
 
+#ifndef VTA_DEVICE_NUM
+#define VTA_DEVICE_NUM 4
+#endif
+
 #define SCOREGEMM "gemm"
 #define SCORELOAD "load"
 #define SCORESTORE "store"
@@ -47,7 +51,7 @@ typedef std::queue<int> Dep_q_t;
 class TlppVerify {
  public:
     /*! Return TlppVefiy class instance.*/
-    static TlppVerify *Global() { static TlppVerify Cls; return &Cls;}
+    static TlppVerify *Global(int index) { static TlppVerify Cls[VTA_DEVICE_NUM]; return &Cls[index];}
 
     /*!
      *  \brief Loop to process instruction and verify tlpp logic.

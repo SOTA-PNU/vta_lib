@@ -5,8 +5,10 @@
 #ifndef VTA_SIM_DEFINES_H
 #define VTA_SIM_DEFINES_H
 
+#define VTA_DEVICE_NUM  4
+
 #define VTA_LOG_INP_BUFF_SIZE 15
-#define VTA_LOG_UOP_BUFF_SIZE 15
+#define VTA_LOG_UOP_BUFF_SIZE 15    // 16 // 15->16 update for evta
 #define VTA_LOG_ACC_BUFF_SIZE 17
 #define VTA_LOG_WGT_BUFF_SIZE 18
 #define VTA_LOG_BATCH 0

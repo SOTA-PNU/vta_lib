@@ -989,13 +989,13 @@ class InsnQueue : public BaseQueue<VTAGenericInsn> {
  */
 class CommandQueue {
  public:
-  CommandQueue() {
-    this->InitSpace();
+  CommandQueue(int index=0) {
+    this->InitSpace(index);
   }
-  void InitSpace() {
+  void InitSpace(int index=0) {
     uop_queue_.InitSpace();
     insn_queue_.InitSpace();
-    device_ = VTADeviceAlloc();
+    device_ = VTADeviceAlloc(index);
     CHECK(device_ != nullptr);
   }
 
@@ -1163,7 +1163,7 @@ class CommandQueue {
   }
 
   void PushGEMMOp(void** uop_handle,
-                  int (*finit)(void*),
+                  int (*finit)(void*,VTACommandHandle cmd),
                   void* signature,
                   int nbytes) {
     UopKernelMap** uptr = reinterpret_cast<UopKernelMap**>(uop_handle);
@@ -1173,7 +1173,7 @@ class CommandQueue {
     UopKernel** kptr = uptr[0]->Get(signature, nbytes);
     if (kptr[0] == nullptr) {
       record_kernel_ = new UopKernel(static_cast<char*>(signature), nbytes);
-      CHECK_EQ((*finit)(signature), 0);
+      CHECK_EQ((*finit)(signature,this), 0);
       kptr[0] = static_cast<UopKernel*>(record_kernel_);
       if (debug_flag_ & VTA_DEBUG_DUMP_UOP) {
         record_kernel_->Dump();
@@ -1185,7 +1185,7 @@ class CommandQueue {
   }
 
   void PushALUUop(void** uop_handle,
-                  int (*finit)(void*),
+                  int (*finit)(void*,VTACommandHandle cmd),
                   void* signature,
                   int nbytes) {
     UopKernelMap** uptr = reinterpret_cast<UopKernelMap**>(uop_handle);
@@ -1195,7 +1195,7 @@ class CommandQueue {
     UopKernel** kptr = uptr[0]->Get(signature, nbytes);
     if (kptr[0] == nullptr) {
       record_kernel_ = new UopKernel(static_cast<char*>(signature), nbytes);
-      CHECK_EQ((*finit)(signature), 0);
+      CHECK_EQ((*finit)(signature,this), 0);
       kptr[0] = static_cast<UopKernel*>(record_kernel_);
       if (debug_flag_ & VTA_DEBUG_DUMP_UOP) {
         record_kernel_->Dump();
@@ -1208,25 +1208,25 @@ class CommandQueue {
 
   static std::shared_ptr<CommandQueue>& ThreadLocal(uint32_t index) {
     static std::shared_ptr<CommandQueue> inst0 =
-        std::make_shared<CommandQueue>();
+        std::make_shared<CommandQueue>(0);
     static std::shared_ptr<CommandQueue> inst1 =
-        std::make_shared<CommandQueue>();
+        std::make_shared<CommandQueue>(1);
     static std::shared_ptr<CommandQueue> inst2 =
-        std::make_shared<CommandQueue>();
+        std::make_shared<CommandQueue>(2);
     static std::shared_ptr<CommandQueue> inst3 =
-        std::make_shared<CommandQueue>();
+        std::make_shared<CommandQueue>(3);
 
     if (inst0 == nullptr) {
-      inst0 = std::make_shared<CommandQueue>();
+      inst0 = std::make_shared<CommandQueue>(0);
     }
     if (inst1 == nullptr) {
-      inst1 = std::make_shared<CommandQueue>();
+      inst1 = std::make_shared<CommandQueue>(1);
     }
     if (inst2 == nullptr) {
-      inst2 = std::make_shared<CommandQueue>();
+      inst2 = std::make_shared<CommandQueue>(2);
     }
     if (inst3 == nullptr) {
-      inst3 = std::make_shared<CommandQueue>();
+      inst3 = std::make_shared<CommandQueue>(3);
     }
 
     if(index==0) return inst0;
@@ -1349,7 +1349,9 @@ class CommandQueue {
 }  // namespace vta
 
 void* VTABufferAlloc(size_t size) {
-  return vta::DataBuffer::Alloc(size);
+  void *p = vta::DataBuffer::Alloc(size);
+  //printf("%p : VTABufferAlloc: %d\n",p,size);
+  return p;
 }
 
 void VTABufferFree(void* buffer) {
@@ -1395,6 +1397,8 @@ void* VTABufferGetVirtAddr(const void* buffer) {
   from_buffer = vta::DataBuffer::FromHandle(buffer);
   return from_buffer->virt_addr();
 }
+
+
 VTACommandHandle VTATLSCommandHandle(uint32_t index) {
   return vta::CommandQueue::ThreadLocal(index).get();
 }
@@ -1494,7 +1498,7 @@ void VTAUopLoopEnd(VTACommandHandle cmdH) {
 
 int VTAPushGEMMOp(VTACommandHandle cmdH,
                   void** uop_handle,
-                  int (*finit)(void*),
+                  int (*finit)(void*,VTACommandHandle cmdH),
                   void* signature,
                   int nbytes) {
   static_cast<vta::CommandQueue*>(cmdH)->
@@ -1504,7 +1508,7 @@ int VTAPushGEMMOp(VTACommandHandle cmdH,
 
 int VTAPushALUOp(VTACommandHandle cmdH,
                  void** uop_handle,
-                 int (*finit)(void*),
+                 int (*finit)(void*,VTACommandHandle cmd),
                  void* signature,
                  int nbytes) {
   static_cast<vta::CommandQueue*>(cmdH)->
@@ -1527,4 +1531,29 @@ int VTADepPop(VTACommandHandle cmd, int from_qid, int to_qid) {
 void VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles) {
   static_cast<vta::CommandQueue*>(cmd)->
       Synchronize(wait_cycles);
+}
+
+
+void VTAPrintEnv() {
+
+            printf("VTA_LOG_INP_WIDTH=%d\n",VTA_LOG_INP_WIDTH);
+            printf("VTA_LOG_INP_BUFF_SIZE=%d\n",VTA_LOG_INP_BUFF_SIZE);
+
+            printf("VTA_LOG_WGT_WIDTH=%d\n",VTA_LOG_WGT_WIDTH);
+            printf("VTA_LOG_WGT_BUFF_SIZE=%d\n",VTA_LOG_WGT_BUFF_SIZE);
+            printf("VTA_LOG_ACC_WIDTH=%d\n",VTA_LOG_ACC_WIDTH);
+            printf("VTA_LOG_ACC_BUFF_SIZE=%d\n",VTA_LOG_ACC_BUFF_SIZE);
+            printf("VTA_LOG_OUT_WIDTH=%d\n",VTA_LOG_OUT_WIDTH);
+            //printf("VTA_LOG_OUT_BUFF_SIZE=%d\n",VTA_LOG_OUT_BUFF_SIZE);
+
+            printf("VTA_LOG_UOP_BUFF_SIZE=%d\n",VTA_LOG_UOP_BUFF_SIZE);
+
+            printf("VTA_LOG_BATCH=%d\n",VTA_LOG_BATCH);
+            //printf("VTA_LOG_BLOCK=%d\n",VTA_LOG_BLOCK);
+
+            printf("VTA_LOG_BLOCK_IN=%d\n",VTA_LOG_BLOCK_IN);
+            printf("VTA_LOG_BLOCK_OUT=%d\n",VTA_LOG_BLOCK_OUT);
+
+            //printf("VTA_LOG_BUS_WIDTH",VTA_LOG_BUS_WIDTH);
+            printf("VTA_DEVICE_NUM=%d\n",VTA_DEVICE_NUM);
 }

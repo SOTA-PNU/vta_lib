@@ -20,76 +20,68 @@ using namespace std;
 
 namespace sim_test_conv1 {
 
-struct alu_param{
-  VTACommandHandle *cmdH;
-  int param;
-};
 
-int finit_gemmop_init(void *param) {
+int finit_gemmop_init(void *param,VTACommandHandle cmdh ) {
   // p = oc
-  int *p = (int *) param;
-  VTACommandHandle *cmdH = (VTACommandHandle*) param;
-  VTAUopLoopBegin(*cmdH, 14, 14, 0, 0);
-  VTAUopLoopBegin(*cmdH, 14, 1, 0, 0);
+//  int *p = (int *) param;
+  VTAUopLoopBegin(cmdh, 14, 14, 0, 0);
+  VTAUopLoopBegin(cmdh, 14, 1, 0, 0);
   //for(int j=0;j<14;j++) { // w,h
-  VTAUopPush(*cmdH, 0, 1, 0, 0, 0, 0, 0, 0);
+  VTAUopPush(cmdh, 0, 1, 0, 0, 0, 0, 0, 0);
   //VTAUopPush(0,1,j,0,0,0,0,0);
   //}
-  VTAUopLoopEnd(*cmdH);
-  VTAUopLoopEnd(*cmdH);
+  VTAUopLoopEnd(cmdh);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
 
-int finit_gemmop_3x3(void *param) {
+int finit_gemmop_3x3(void *param, VTACommandHandle cmdh) {
 
-  VTACommandHandle *cmdH = (VTACommandHandle*) param;
-  VTAUopLoopBegin(*cmdH, 14, 14, 16, 0);
-  VTAUopLoopBegin(*cmdH, 3, 0, 16, 3);
+  VTAUopLoopBegin(cmdh, 14, 14, 16, 0);
+  VTAUopLoopBegin(cmdh, 3, 0, 16, 3);
   for (int dx = 0; dx < 3; dx++) {
     for (int j = 0; j < 14; j++) {
-      VTAUopPush(*cmdH, 0, 0, j, (j + dx), dx, 0, 0, 0);
+      VTAUopPush(cmdh, 0, 0, j, (j + dx), dx, 0, 0, 0);
     }
   }
-  VTAUopLoopEnd(*cmdH);
-  VTAUopLoopEnd(*cmdH);
+  VTAUopLoopEnd(cmdh);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
 
 // alu func
-int finit_shr(void *param) {
-  struct alu_param * params = (struct alu_param*) param;
-  VTACommandHandle *cmdH = params->cmdH;
-  int p = params->param;
-  VTAUopLoopBegin(*cmdH, p, 1, 1, 0);
-  VTAUopPush(*cmdH, 1, 0, 0, 0, 0, 3, 1, 8);
+int finit_shr(void *param, VTACommandHandle cmdh) {
+  
+  
+  int *p = (int*) param;
+  VTAUopLoopBegin(cmdh, *p, 1, 1, 0);
+  VTAUopPush(cmdh, 1, 0, 0, 0, 0, 3, 1, 8);
   //VTAUopPush(1, 0, 0, 0, 0, 3, 1, 7); // input 5. output 7. 12shift
-  VTAUopLoopEnd(*cmdH);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
 
-int finit_max(void *param) {
-  struct alu_param * params = (struct alu_param*) param;
-  VTACommandHandle *cmdH = params->cmdH;
-  int p = params->param;
-  VTAUopLoopBegin(*cmdH, p, 1, 1, 0);
-  VTAUopPush(*cmdH, 1, 0, 0, 0, 0, 1, 1, 0);
-  VTAUopLoopEnd(*cmdH);
+int finit_max(void *param, VTACommandHandle cmdH) {
+  int *p = (int*) param;
+  VTAUopLoopBegin(cmdH, *p, 1, 1, 0);
+  VTAUopPush(cmdH, 1, 0, 0, 0, 0, 1, 1, 0);
+  VTAUopLoopEnd(cmdH);
   return 0;
 }
 
-int finit_min(void *param) {
-  struct alu_param * params = (struct alu_param*) param;
-  VTACommandHandle *cmdH = params->cmdH;
-  int p = params->param;
-  VTAUopLoopBegin(*cmdH, p, 1, 1, 0);
-  VTAUopPush(*cmdH, 1, 0, 0, 0, 0, 0, 1, 127);
-  VTAUopLoopEnd(*cmdH);
+int finit_min(void *param, VTACommandHandle cmdH) {
+  int *p = (int*) param;
+  VTAUopLoopBegin(cmdH, *p, 1, 1, 0);
+  VTAUopPush(cmdH, 1, 0, 0, 0, 0, 0, 1, 127);
+  VTAUopLoopEnd(cmdH);
   return 0;
 }
 }
 
 using namespace sim_test_conv1;
 int conv1_test(){
+   
+
     int is_diff = 0;
     srand(time(NULL));
 
@@ -299,10 +291,10 @@ int conv1_test(){
                     VTADepPop(vtaCmdH,2,1);
 
                     //param_alu = oc * 98;
-                    //int param_alu = 196;
-                    struct alu_param param_alu;
-                    param_alu.cmdH = &vtaCmdH;
-                    param_alu.param = 196;
+                    int param_alu = 196;
+                    //struct alu_param param_alu;
+                    //param_alu.cmdH = &vtaCmdH;
+                    //param_alu.param = 196;
 
 
                     VTAPushALUOp(vtaCmdH, uopHandle3,&sim_test_conv1::finit_shr,&param_alu,0);

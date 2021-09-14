@@ -245,7 +245,7 @@ TVM_DLL void VTAUopLoopEnd(VTACommandHandle cmdH);
  */
 TVM_DLL int VTAPushGEMMOp(VTACommandHandle cmdH,
                           void** uop_handle,
-                          int (*finit)(void*),
+                          int (*finit)(void*, VTACommandHandle cmdH),
                           void* signature,
                           int nbytes);
 
@@ -259,7 +259,7 @@ TVM_DLL int VTAPushGEMMOp(VTACommandHandle cmdH,
  */
 TVM_DLL int VTAPushALUOp(VTACommandHandle cmdH,
                          void** uop_handle,
-                         int (*finit)(void*),
+                         int (*finit)(void*, VTACommandHandle cmdH),
                          void* signature,
                          int nbytes);
 
@@ -291,6 +291,11 @@ TVM_DLL int VTADepPop(VTACommandHandle cmd, int from_qid, int to_qid);
  *
  */
 TVM_DLL void VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles);
+
+/*!
+* \brief print vta env defines
+ */
+void VTAPrintEnv();
 
 #ifdef __cplusplus
 }

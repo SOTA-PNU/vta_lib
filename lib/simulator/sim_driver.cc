@@ -264,9 +264,9 @@ class Profiler {
     return os.str();
   }
 
-  static Profiler* ThreadLocal() {
-    static thread_local Profiler inst;
-    return &inst;
+  static Profiler* ThreadLocal(int index=0) {
+    static thread_local Profiler inst[VTA_DEVICE_NUM];
+    return &inst[index];
   }
 };
 
@@ -275,10 +275,10 @@ class Profiler {
 // TODO(tqchen,thierry): queue based event driven simulation.
 class Device {
  public:
-  Device() {
-    prof_ = Profiler::ThreadLocal();
+  Device(int index=0) {
+    prof_ = Profiler::ThreadLocal(index);
     dram_ = DRAM::Global();
-    ptlpp = TlppVerify::Global();
+    ptlpp = TlppVerify::Global(index);
   }
 
   int Run(vta_phy_addr_t insn_phy_addr,
@@ -536,8 +536,8 @@ void VTAFlushCache(void* vir_addr, vta_phy_addr_t phy_addr, int size) {
 void VTAInvalidateCache(void* vir_addr, vta_phy_addr_t phy_addr, int size) {
 }
 
-VTADeviceHandle VTADeviceAlloc() {
-  return new vta::sim::Device();
+VTADeviceHandle VTADeviceAlloc(int index) {
+  return new vta::sim::Device(index);
 }
 
 void VTADeviceFree(VTADeviceHandle handle) {
