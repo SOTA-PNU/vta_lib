@@ -20,9 +20,7 @@ void VTABufferCopy(const void* from,
                    int kind_mask);
 
 void* VTABufferGetVirtAddr(const void* buffer);
-VTACommandHandle VTATLSCommandHandle() ;
 
-void VTARuntimeShutdown();
 void VTASetDebugMode(VTACommandHandle cmd, int debug_flag) ;
 
 void* VTABufferCPUPtr(VTACommandHandle cmd, void* buffer) ;
@@ -75,14 +73,16 @@ void VTAUopLoopBegin(uint32_t extent,
 
 void VTAUopLoopEnd() ;
 
-int VTAPushGEMMOp(void** uop_handle,
-                  int (*finit)(void*),
+int VTAPushGEMMOp(VTACommandHandle cmdH,
+                  void** uop_handle,
+                  int (*finit)(void*,VTACommandHandle),
                   void* signature,
                   int nbytes,
                   bool from_outmem
                   ) ;
-int VTAPushALUOp(void** uop_handle,
-                 int (*finit)(void*),
+int VTAPushALUOp(VTACommandHandle cmdH,
+                 void** uop_handle,
+                 int (*finit)(void*,VTACommandHandle),
                  void* signature,
                  int nbytes) ;
 

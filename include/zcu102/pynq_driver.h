@@ -60,6 +60,14 @@ uint32_t VTAReadMappedReg(void* base_addr, uint32_t offset);
 /*! \brief VTA configuration register done value */
 #define VTA_DONE 0x1
 
+#ifndef VTA_DEVICE_NUM
+#define VTA_DEVICE_NUM 1
+#endif
+
+#if VTA_DEVICE_NUM > 2 && PROFILE_ENABLE
+#error PERF_MON cannot be used for MULTI-VTA
+#endif
+
 #ifdef __cplusplus
 }
 #endif

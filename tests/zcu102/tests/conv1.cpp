@@ -4,146 +4,134 @@
 #include <cstdint>
 #include <fstream>
 #include <vector>
-
+#include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 
-#include "vta/runtime.h"
-#include <assert.h>
+#include <vta/runtime.h>
 
-
-
-#define RESET_IOCTL _IOWR('X', 101, unsigned long)
+#include <time.h>
 
 using namespace std;
 
-
-#define INPUT_CH 16
-#define OUTPUT_CH  16
-
-
-
-void xlnk_reset() {
-
-  int xlnkfd = open("/dev/xlnk", O_RDWR | O_CLOEXEC);
-  if (xlnkfd < 0) {
-    printf("Reset failed - could not open device: %d\n", xlnkfd);
-    return;
-  }
-  if (ioctl(xlnkfd, RESET_IOCTL, 0) < 0) {
-    printf("Reset failed - IOCTL failed: %d\n", errno);
-  }
-  close(xlnkfd);
-}
-
-
+#define EVTA_ID 0
 
 
 namespace sim_test_conv1 {
-  int finit_gemmop_init(void *param) {
-    // p = oc
-    int *p = (int *) param;
-    VTAUopLoopBegin(14, 14, 0, 0);
-    VTAUopLoopBegin(14, 1, 0, 0);
-    //for(int j=0;j<14;j++) { // w,h
-    VTAUopPush(0, 1, 0, 0, 0, 0, 0, 0);
-    //VTAUopPush(0,1,j,0,0,0,0,0);
-    //}
-    VTAUopLoopEnd();
-    VTAUopLoopEnd();
-    return 0;
-  }
 
-  int finit_gemmop_3x3(void *param) {
-    VTAUopLoopBegin(14, 14, 16, 0);
-    VTAUopLoopBegin(3, 0, 16, 3);
-    for (int dx = 0; dx < 3; dx++) {
-      for (int j = 0; j < 14; j++) {
-        VTAUopPush(0, 0, j, (j + dx), dx, 0, 0, 0);
-      }
+struct alu_param{
+  int param;
+};
+
+int finit_gemmop_init(void *param,VTACommandHandle cmdH) {
+  // p = oc
+  int *p = (int *) param;
+  VTAUopLoopBegin(cmdH, 14, 14, 0, 0);
+  VTAUopLoopBegin(cmdH, 14, 1, 0, 0);
+  //for(int j=0;j<14;j++) { // w,h
+  VTAUopPush(cmdH, 0, 1, 0, 0, 0, 0, 0, 0);
+  //VTAUopPush(0,1,j,0,0,0,0,0);
+  //}
+  VTAUopLoopEnd(cmdH);
+  VTAUopLoopEnd(cmdH);
+  return 0;
+}
+
+int finit_gemmop_3x3(void *param,VTACommandHandle cmdH) {
+
+
+  VTAUopLoopBegin(cmdH, 14, 14, 16, 0);
+  VTAUopLoopBegin(cmdH, 3, 0, 16, 3);
+  for (int dx = 0; dx < 3; dx++) {
+    for (int j = 0; j < 14; j++) {
+      VTAUopPush(cmdH, 0, 0, j, (j + dx), dx, 0, 0, 0);
     }
-    VTAUopLoopEnd();
-    VTAUopLoopEnd();
-    return 0;
   }
+  VTAUopLoopEnd(cmdH);
+  VTAUopLoopEnd(cmdH);
+  return 0;
+}
 
 // alu func
-  int finit_shr(void *param) {
-    int *p = (int *) (param);
-    VTAUopLoopBegin(*p, 1, 1, 0);
-    VTAUopPush(1, 0, 0, 0, 0, 3, 1, 8);
-    //VTAUopPush(1, 0, 0, 0, 0, 3, 1, 7); // input 5. output 7. 12shift
-    VTAUopLoopEnd();
-    return 0;
-  }
+int finit_shr(void *param,  VTACommandHandle cmdH) {
 
-  int finit_max(void *param) {
-    int *p = (int *) (param);
-    VTAUopLoopBegin(*p, 1, 1, 0);
-    VTAUopPush(1, 0, 0, 0, 0, 1, 1, 0);
-    VTAUopLoopEnd();
-    return 0;
-  }
+  int *p = (int *) (param);
+  VTAUopLoopBegin(cmdH, *p, 1, 1, 0);
+  VTAUopPush(cmdH, 1, 0, 0, 0, 0, 3, 1, 8);
+  //VTAUopPush(1, 0, 0, 0, 0, 3, 1, 7); // input 5. output 7. 12shift
+  VTAUopLoopEnd(cmdH);
+  return 0;
+}
 
-  int finit_min(void *param) {
-    int *p = (int *) (param);
-    VTAUopLoopBegin(*p, 1, 1, 0);
-    VTAUopPush(1, 0, 0, 0, 0, 0, 1, 127);
-    VTAUopLoopEnd();
-    return 0;
-  }
+int finit_max(void *param,  VTACommandHandle cmdH) {
+  int *p = (int *) (param);
+  VTAUopLoopBegin(cmdH, *p, 1, 1, 0);
+  VTAUopPush(cmdH, 1, 0, 0, 0, 0, 1, 1, 0);
+  VTAUopLoopEnd(cmdH);
+  return 0;
+}
+
+int finit_min(void *param,  VTACommandHandle cmdH) {
+  
+  int *p = (int *) (param);
+  VTAUopLoopBegin(cmdH, *p, 1, 1, 0);
+  VTAUopPush(cmdH, 1, 0, 0, 0, 0, 0, 1, 127);
+  VTAUopLoopEnd(cmdH);
+  return 0;
+}
 }
 
 using namespace sim_test_conv1;
-int main(){
-  xlnk_reset();
-  int is_diff = 0;
-  srand((unsigned int)time(0));
-  //N, H, W, C
-  //N == 1
-  //group == 1
-  struct timeval tv_s, tv_e;
+int conv1_test(){
+    int is_diff = 0;
+    srand(time(NULL));
+
+    //N, H, W, C
+    //N == 1
+    //group == 1
+    struct timeval tv_s, tv_e;
 
 
 
-  int N = 1;
-  int H = 14;
-  int W = 14;
-  int C = 16;
-  int KN = 16;
-  int KH = 3;
-  int KW = 3;
-  int8_t in1[N][H][W][C];
-  int8_t filter[KN][KH][KW][C];
+    int N = 1;
+    int H = 14;
+    int W = 14;
+    int C = 16;
+    int KN = 16;
+    int KH = 3;
+    int KW = 3;
+    int8_t in1[N][H][W][C];
+    int8_t filter[KN][KH][KW][C];
 
-  for(int i =0; i < N; i++){
-    for(int j =0 ; j < H; j++){
-      for(int k =0; k< W; k++){
-        for(int l =0; l<C; l++){
-          in1[i][j][k][l]=(int8_t)(1);
+    for(int i =0; i < N; i++){
+        for(int j =0 ; j < H; j++){
+            for(int k =0; k< W; k++){
+                for(int l =0; l<C; l++){
+                    in1[i][j][k][l]=(int8_t)(rand()%60);
+                }
+            }
         }
-      }
     }
-  }
 
-  for(int i =0; i < KN; i++){
-    for(int j =0 ; j < KH; j++){
-      for(int k =0; k< KW; k++){
-        for(int l =0; l<C; l++){
-          if(rand()%2==0) filter[i][j][k][l]=filter[i][j][k][l]*-1;
+    for(int i =0; i < KN; i++){
+        for(int j =0 ; j < KH; j++){
+            for(int k =0; k< KW; k++){
+                for(int l =0; l<C; l++){
+                    filter[i][j][k][l]=(int8_t)(rand()%60);
+                    if(rand()%2==0) filter[i][j][k][l]=filter[i][j][k][l]*-1;
+                }
+            }
         }
-      }
     }
-  }
 
-  int batch_size = N;
-  int pad_size = 1;
-  int stride_size = 1;
+    int batch_size = N;
+    int pad_size = 1;
+    int stride_size = 1;
 
-  int filter_h = KH;
-  int filter_w = KW;
-  int filter_size = KN;
+    int filter_h = KH;
+    int filter_w = KW;
+    int filter_size = KN;
 
 
 
@@ -186,10 +174,10 @@ int main(){
     uopHandle4[0]=nullptr;
     uopHandle5[0]=nullptr;
 
-    VTACommandHandle vtaCmdH{nullptr};
-    vtaCmdH = VTATLSCommandHandle();
-    VTASetDebugMode(vtaCmdH,VTA_DEBUG_DUMP_INSN | VTA_DEBUG_DUMP_UOP);
-    //VTASetDebugMode(vtaCmdH,0);
+        VTACommandHandle vtaCmdH{nullptr};
+        vtaCmdH = VTATLSCommandHandle(EVTA_ID);
+        //VTASetDebugMode(vtaCmdH,VTA_DEBUG_DUMP_INSN | VTA_DEBUG_DUMP_UOP);
+        VTASetDebugMode(vtaCmdH,0);
 
 
     // transpose NHWC -> nchwnc
@@ -260,10 +248,10 @@ int main(){
           //int uop_input[9] = { N, M , K, L, 3, 3, filter_size, pad_size, stride_size}
           // fixed params.
 
-          VTADepPop(vtaCmdH,3,2);
-          // 초기화
-          // 초기화는 oc, ic비교안해도됨. 무조건 oc가 큼
-          VTAPushGEMMOp(uopHandle1,&sim_test_conv1::finit_gemmop_init, &oc,0);
+                    VTADepPop(vtaCmdH,3,2);
+                    // 초기화
+                    // 초기화는 oc, ic비교안해도됨. 무조건 oc가 큼
+                    VTAPushGEMMOp(vtaCmdH, uopHandle1,&sim_test_conv1::finit_gemmop_init, &vtaCmdH,0);
 
           VTADepPush(vtaCmdH,2,1);
           //for(int ic_out=0;ic_out < ic;ic_out++) {
@@ -296,24 +284,24 @@ int main(){
                           0, 0, 0, 0, 0, 1 );
 
 
-          VTADepPush(vtaCmdH,1,2);
-          VTADepPop(vtaCmdH,1,2);
-
-          VTAPushGEMMOp(uopHandle2,&sim_test_conv1::finit_gemmop_3x3,&oc,0);
+                        VTADepPush(vtaCmdH,1,2);
+                        VTADepPop(vtaCmdH,1,2);
+                        VTAPushGEMMOp(vtaCmdH, uopHandle2,&sim_test_conv1::finit_gemmop_3x3,&vtaCmdH,0);
 
           VTADepPush(vtaCmdH,2,1);
           VTADepPop(vtaCmdH,2,1);
 
-          //param_alu = oc * 98;
-          int param_alu = 196;
+                    //param_alu = oc * 98;
+                    //int param_alu = 196;
+                    int param = 196;
 
-/*
-          VTAPushALUOp(uopHandle3,&sim_test_conv1::finit_shr,&param_alu,0);
-          VTAPushALUOp(uopHandle4,&sim_test_conv1::finit_max,&param_alu,0);
-          VTAPushALUOp(uopHandle5,&sim_test_conv1::finit_min,&param_alu,0);
-*/
-          VTADepPush(vtaCmdH,2,3);
-          VTADepPop(vtaCmdH,2,3);
+
+                    VTAPushALUOp(vtaCmdH, uopHandle3,&finit_shr,&param,0);
+                    VTAPushALUOp(vtaCmdH, uopHandle4,&finit_max,&param,0);
+                    VTAPushALUOp(vtaCmdH, uopHandle5,&sim_test_conv1::finit_min,&param,0);
+
+                    VTADepPush(vtaCmdH,2,3);
+                    VTADepPop(vtaCmdH,2,3);
 
 
           //for(int i1_in=0;i1_in < oc; i1_in++) {
@@ -343,7 +331,7 @@ int main(){
     VTASynchronize(vtaCmdH,1<<31);
     VTABufferCopy(RES_buf, 0, output_data8, 0, out_h*out_w*filter_size, 2);  // 1 MemCopyToHost
 
-    VTARuntimeShutdown();
+        VTARuntimeShutdown(EVTA_ID);
 
     // end case
     VTABufferFree( DATA_buf );
@@ -403,13 +391,12 @@ int main(){
                 }
               }
             }
-            /*
-            total = total >> 8;
-            if(total > 127) total = 127;
-            if(total <0) total = 0;
-*/
-            result[b][i][j][fc] = total;
-            new_w_idx += stride_size;
+                        total = total >> 8;
+                        if(total > 127) total = 127;
+                        if(total <0) total = 0;
+
+                        result[b][i][j][fc] = total;
+                        new_w_idx += stride_size;
           }
           new_h_idx += stride_size;
           new_w_idx = 0;

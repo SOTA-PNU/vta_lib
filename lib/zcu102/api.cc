@@ -63,12 +63,12 @@ void* VTABufferGetVirtAddr(const void* buffer) {
   return from_buffer->virt_addr();
 }
 
-VTACommandHandle VTATLSCommandHandle() {
-  return vta::CommandQueue::ThreadLocal().get();
+VTACommandHandle VTATLSCommandHandle(uint32_t index) {
+  return vta::CommandQueue::ThreadLocal(index).get();
 }
 
-void VTARuntimeShutdown() {
-  vta::CommandQueue::Shutdown();
+void VTARuntimeShutdown(uint32_t index) {
+  vta::CommandQueue::Shutdown(index);
 }
 
 void VTASetDebugMode(VTACommandHandle cmd, int debug_flag) {
@@ -132,7 +132,8 @@ void VTAStoreBuffer2D(VTACommandHandle cmd,
                     x_size, y_size, x_stride);
 }
 
-void VTAUopPush(uint32_t mode,
+void VTAUopPush(VTACommandHandle cmd,
+                uint32_t mode,
                 uint32_t reset_out,
                 uint32_t dst_index,
                 uint32_t src_index,
@@ -141,43 +142,46 @@ void VTAUopPush(uint32_t mode,
                 uint32_t use_imm,
                 int32_t imm_val) {
     //printf("VTAuoppush");
-  vta::CommandQueue::ThreadLocal()->record_kernel()
+  static_cast<vta::CommandQueue*>(cmd)->record_kernel()
       ->Push(mode, reset_out, dst_index, src_index,
              wgt_index, opcode, use_imm, imm_val);
 }
 
-void VTAUopLoopBegin(uint32_t extent,
+void VTAUopLoopBegin(VTACommandHandle cmd,
+                     uint32_t extent,
                      uint32_t dst_factor,
                      uint32_t src_factor,
                      uint32_t wgt_factor) {
                        //printf("VTAuopLoopB");
-  vta::CommandQueue::ThreadLocal()->record_kernel()
+  static_cast<vta::CommandQueue*>(cmd)->record_kernel()
       ->PushLoopBegin(extent, dst_factor, src_factor, wgt_factor);
 }
 
-void VTAUopLoopEnd() {
+void VTAUopLoopEnd(VTACommandHandle cmd) {
   //printf("VTAuopLoopE");
-  vta::CommandQueue::ThreadLocal()->record_kernel()
+  static_cast<vta::CommandQueue*>(cmd)->record_kernel()
       ->PushLoopEnd();
 }
 
-int VTAPushGEMMOp(void** uop_handle,
-                  int (*finit)(void*),
+int VTAPushGEMMOp(VTACommandHandle cmd,
+                  void** uop_handle,
+                   int (*finit)(void*,VTACommandHandle),
                   void* signature,
                   int nbytes,
                   bool from_outmem) {
 	//printf("VTAPushGEMMOp %p, %p, %p, %d\n",uop_handle, finit, signature, nbytes);
 	
-  vta::CommandQueue::ThreadLocal()->
+  static_cast<vta::CommandQueue*>(cmd)->
       PushGEMMOp(uop_handle, finit, signature, nbytes, from_outmem);
   return 0;
 }
 
-int VTAPushALUOp(void** uop_handle,
-                 int (*finit)(void*),
+int VTAPushALUOp(VTACommandHandle cmd,
+                 void** uop_handle,
+                 int (*finit)(void*,VTACommandHandle),
                  void* signature,
                  int nbytes) {
-  vta::CommandQueue::ThreadLocal()->
+  static_cast<vta::CommandQueue*>(cmd)->
       PushALUUop(uop_handle, finit, signature, nbytes);
   return 0;
 }

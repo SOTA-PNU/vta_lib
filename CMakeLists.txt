@@ -9,6 +9,12 @@ option(NESTC_EVTA_PROFILE "Profile mode for EVTA HW" OFF)
 INCLUDE_DIRECTORIES(include 3rdparty/dlpack/include)
 INCLUDE_DIRECTORIES(include 3rdparty/dmlc-core/include)
 
+#use VTALIB_ONLY running without nest-c
+add_definitions(-DVTALIB_ONLY=1)
+
+SET(NESTC_EVTA_RUN_WITH_GENERIC_BUNDLE 0)
+SET(NESTC_EVTA_RUN_ON_ZCU102 1)
+
 if(NOT NESTC_EVTA_RUN_ON_ZCU102)
     message(STATUS "VTALIB with Simulator")
     add_definitions(-DNESTC_USE_VTASIM=1)
@@ -35,23 +41,24 @@ else()
             -DVTA_LOG_OUT_WIDTH=3
             -DVTA_LOG_OUT_BUFF_SIZE=16
             -DVTA_LOG_BUS_WIDTH=7
+            -DVTA_DEVICE_NUM=4
             -DVTA_IP_REG_MAP_RANGE=0x1000
-            #-DVTA_FETCH_ADDR=0xA0000000
-            #-DVTA_LOAD_ADDR=0xA0001000
-            #-DVTA_COMPUTE_ADDR=0xA0002000
-            #-DVTA_STORE_ADDR=0xA0003000
-            #-DVTA_FETCH_ADDR=0xA0010000
-            #-DVTA_LOAD_ADDR=0xA0011000
-            #-DVTA_COMPUTE_ADDR=0xA0012000
-            #-DVTA_STORE_ADDR=0xA0013000
-            #-DVTA_FETCH_ADDR=0xA0020000
-            #-DVTA_LOAD_ADDR=0xA0021000
-            #-DVTA_COMPUTE_ADDR=0xA0022000
-            #-DVTA_STORE_ADDR=0xA0023000
-            -DVTA_FETCH_ADDR=0xA0030000
-            -DVTA_LOAD_ADDR=0xA0031000
-            -DVTA_COMPUTE_ADDR=0xA0032000
-            -DVTA_STORE_ADDR=0xA0033000
+            -DVTA_FETCH_ADDR=0xA0000000
+            -DVTA_LOAD_ADDR=0xA0001000
+            -DVTA_COMPUTE_ADDR=0xA0002000
+            -DVTA_STORE_ADDR=0xA0003000
+            -DVTA_FETCH_ADDR_1=0xA0010000
+            -DVTA_LOAD_ADDR_1=0xA0011000
+            -DVTA_COMPUTE_ADDR_1=0xA0012000
+            -DVTA_STORE_ADDR_1=0xA0013000
+            -DVTA_FETCH_ADDR_2=0xA0020000
+            -DVTA_LOAD_ADDR_2=0xA0021000
+            -DVTA_COMPUTE_ADDR_2=0xA0022000
+            -DVTA_STORE_ADDR_2=0xA0023000
+            -DVTA_FETCH_ADDR_3=0xA0030000
+            -DVTA_LOAD_ADDR_3=0xA0031000
+            -DVTA_COMPUTE_ADDR_3=0xA0032000
+            -DVTA_STORE_ADDR_3=0xA0033000
             -DVTA_FETCH_INSN_COUNT_OFFSET=16
             -DVTA_FETCH_INSN_ADDR_OFFSET=24
             -DVTA_LOAD_INP_ADDR_OFFSET=16
@@ -97,6 +104,7 @@ endif()
 if(NOT NESTC_EVTA_RUN_WITH_GENERIC_BUNDLE)
     add_definitions(-DVTA_RUN_ON_AARCH64)
     add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle_aarch64.cpp)
+    INCLUDE_DIRECTORIES(/usr/lib/llvm-8.0/include)
 else()
     add_library(VTABundle lib/Bundle/VTABundle.cpp lib/Bundle/CPUBundle_generic.cpp)
 endif()
@@ -108,8 +116,10 @@ if(NESTC_EVTA_LIB_VALIDATION)
     add_definitions(-DVTA_VALIDATION)
 endif()
 if(NESTC_EVTA_PROFILE)
+    message("profile enabled")
     add_definitions(-DPROFILE_ENABLE=1)
 else()
+    message("profile disabled")
     add_definitions(-DPROFILE_ENABLE=0)
 endif()
 target_link_libraries(VTABundle PUBLIC
@@ -117,5 +127,6 @@ target_link_libraries(VTABundle PUBLIC
         vta_runtime LLVMSupport pthread glog gflags gomp)
 
 if(NOT NESTC_USE_VTASIM)
+    message("not vtasim. linking cma library")
     target_link_libraries(VTABundle PUBLIC cma)
 endif()

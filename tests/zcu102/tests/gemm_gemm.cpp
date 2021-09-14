@@ -13,6 +13,7 @@
 
 #include <time.h>
 
+#define EVTA_ID 1
 
 #define RESET_IOCTL _IOWR('X', 101, unsigned long)
 
@@ -30,19 +31,19 @@ void xlnk_reset() {
   close(xlnkfd);
 }
 
-int gemm2(void* param)
+int gemm2(void* param, VTACommandHandle cmdh)
 {
-  VTAUopLoopBegin( 1,0,0,0);
-  VTAUopPush(0, 1, 0, 0, 0, 2, 0, 0);
-  VTAUopLoopEnd();
+  VTAUopLoopBegin( cmdh,1,0,0,0);
+  VTAUopPush(cmdh,0, 1, 0, 0, 0, 2, 0, 0);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
 
-int finit_gemmgemm(void*)
+int finit_gemmgemm(void*,VTACommandHandle cmdh)
 {
-  VTAUopLoopBegin(1,0,0,0);
-  VTAUopPush(0,1,0,0,0,0,0,0);
-  VTAUopLoopEnd();
+  VTAUopLoopBegin(cmdh,1,0,0,0);
+  VTAUopPush(cmdh,0,1,0,0,0,0,0,0);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
 

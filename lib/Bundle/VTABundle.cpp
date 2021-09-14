@@ -8,12 +8,21 @@
 #include <cassert>
 #include "llvm/ADT/ArrayRef.h"
 
+#if(!VTALIB_ONLY)
 #if(NESTC_USE_VTASIM)
 #include "runtime.h"
 #else
 #include "vta/vtalib/include/zcu102/vta/runtime.h"
 #endif
 #include "vta/vtalib/include/Bundle/VTABundle.h"
+#else
+#if(NESTC_USE_VTASIM)
+#include "simulator/vta/runtime.h"
+#else
+#include "zcu102/vta/runtime.h"
+#endif
+#include "Bundle/VTABundle.h"
+#endif
 
 #define RESET_IOCTL _IOWR('X', 101, unsigned long)
 
@@ -43,7 +52,7 @@ void xlnk_reset() {
 
 
 struct ResetAcc {
-  VTACommandHandle *cmdH;
+//  VTACommandHandle *cmdH;
   uint32_t base_;
   uint32_t size_;
   bool operator==(ResetAcc &op) {
@@ -53,17 +62,16 @@ struct ResetAcc {
   }
 };
 
-int reset_acc(void *param) {
+int reset_acc(void *param,VTACommandHandle cmdh) {
   ResetAcc *p = (ResetAcc *) (param);
-  VTAUopLoopBegin(*(p->cmdH), p->size_, 1, 0, 0);
-  VTAUopPush(*(p->cmdH), 0, 1, p->base_, 0, 0, 0, 0, 0);
-  VTAUopLoopEnd(*(p->cmdH));
+  VTAUopLoopBegin(cmdh, p->size_, 1, 0, 0);
+  VTAUopPush(cmdh, 0, 1, p->base_, 0, 0, 0, 0, 0);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
 
 
 struct gemmop_mxn {
-  VTACommandHandle *cmdH;
   uint32_t tile_size_h_;
   uint32_t tile_size_w_;
   uint32_t in_tile_size_h_;
@@ -97,17 +105,17 @@ struct gemmop_mxn {
 
 };
 
-int gemmop_mxn(void *param) {
+int gemmop_mxn(void *param,VTACommandHandle cmdh ) {
 
   struct gemmop_mxn *ctx = (struct gemmop_mxn *) (param);
-  VTAUopLoopBegin(*(ctx->cmdH), ctx->tile_size_w_, 1, ctx->stride_w_, 0);
-  VTAUopLoopBegin(*(ctx->cmdH), ctx->kernel_w_, 0, 1, 1);
+  VTAUopLoopBegin(cmdh, ctx->tile_size_w_, 1, ctx->stride_w_, 0);
+  VTAUopLoopBegin(cmdh, ctx->kernel_w_, 0, 1, 1);
 
   for (int dx = 0; dx < ctx->kernel_h_; dx++) {
     for (int kernelIdx = 0; kernelIdx < ctx->n_kernel_; kernelIdx++) {
       for (int inTileHIdx = 0; inTileHIdx < ctx->tile_size_h_; inTileHIdx++) {
         auto outTileHIdx = inTileHIdx + (kernelIdx * ctx->tile_size_h_);
-        VTAUopPush(*(ctx->cmdH), 0, 0, ctx->output_base_addr_ + outTileHIdx * ctx->tile_size_w_,
+        VTAUopPush(cmdh, 0, 0, ctx->output_base_addr_ + outTileHIdx * ctx->tile_size_w_,
                    ctx->input_base_addr_ + (inTileHIdx * ctx->stride_h_ + dx) * (ctx->in_tile_size_w_),
                    ctx->weight_base_addr_ + dx * ctx->kernel_w_ + kernelIdx * (ctx->kernel_w_ * ctx->kernel_h_), 0, 0,
                    0);
@@ -115,22 +123,22 @@ int gemmop_mxn(void *param) {
     }
   }
 
-  VTAUopLoopEnd(*(ctx->cmdH));
-  VTAUopLoopEnd(*(ctx->cmdH));
+  VTAUopLoopEnd(cmdh);
+  VTAUopLoopEnd(cmdh);
 
   return 0;
 }
 
-int gemmop_1x1(void *param) {
+int gemmop_1x1(void *param,VTACommandHandle cmdh) {
 
   struct gemmop_mxn *ctx = (struct gemmop_mxn *) (param);
-  VTAUopLoopBegin(*(ctx->cmdH), ctx->tile_size_w_, 1, ctx->stride_w_, 0);
-  VTAUopLoopBegin(*(ctx->cmdH), ctx->n_kernel_, ctx->tile_size_w_ * ctx->tile_size_h_, 0, 1);
+  VTAUopLoopBegin(cmdh, ctx->tile_size_w_, 1, ctx->stride_w_, 0);
+  VTAUopLoopBegin(cmdh, ctx->n_kernel_, ctx->tile_size_w_ * ctx->tile_size_h_, 0, 1);
 
   for (int dx = 0; dx < ctx->kernel_h_; dx++) {
     for (int inTileHIdx = 0; inTileHIdx < ctx->tile_size_h_; inTileHIdx++) {
       auto outTileHIdx = inTileHIdx;
-      VTAUopPush(*(ctx->cmdH), 0, 0, ctx->output_base_addr_ + outTileHIdx * ctx->tile_size_w_,
+      VTAUopPush(cmdh, 0, 0, ctx->output_base_addr_ + outTileHIdx * ctx->tile_size_w_,
                  ctx->input_base_addr_ + (inTileHIdx * ctx->stride_h_ + dx) * (ctx->in_tile_size_w_),
                  ctx->weight_base_addr_ + dx * ctx->kernel_w_, 0, 0,
                  0);
@@ -138,14 +146,13 @@ int gemmop_1x1(void *param) {
 
   }
 
-  VTAUopLoopEnd(*(ctx->cmdH));
-  VTAUopLoopEnd(*(ctx->cmdH));
+  VTAUopLoopEnd(cmdh);
+  VTAUopLoopEnd(cmdh);
 
   return 0;
 }
 // alu func
 struct ShiftContext {
-  VTACommandHandle *cmdH;
   uint32_t base_;
   uint32_t size_;
   uint8_t shift_;
@@ -157,16 +164,15 @@ struct ShiftContext {
     return false;
   }
 };
-int alu_shr(void *param) {
+int alu_shr(void *param,VTACommandHandle cmdh) {
   ShiftContext *p = (ShiftContext *) (param);
-  VTAUopLoopBegin(*(p->cmdH), p->size_, 1, 1, 0);
-  VTAUopPush(*(p->cmdH), 1, 0, p->base_, p->base_, 0, 3, 1, p->shift_);
-  VTAUopLoopEnd(*(p->cmdH));
+  VTAUopLoopBegin(cmdh, p->size_, 1, 1, 0);
+  VTAUopPush(cmdh, 1, 0, p->base_, p->base_, 0, 3, 1, p->shift_);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
 
 struct AddContext {
-  VTACommandHandle *cmdH;
   uint32_t dst_;
   uint32_t src_;
   uint32_t size_;
@@ -181,38 +187,38 @@ struct AddContext {
   }
 };
 
-int alu_add(void *param) {
+int alu_add(void *param,VTACommandHandle cmdh) {
   AddContext *p = (AddContext *) (param);
-  VTAUopLoopBegin(*(p->cmdH), p->iter_, p->size_, 1, 0);
-  VTAUopLoopBegin(*(p->cmdH), p->size_, 1, 0, 0);
+  VTAUopLoopBegin(cmdh, p->iter_, p->size_, 1, 0);
+  VTAUopLoopBegin(cmdh, p->size_, 1, 0, 0);
 
-  VTAUopPush(*(p->cmdH), 1, 0, p->dst_, p->src_, 0, 2, 0, 0);
+  VTAUopPush(cmdh, 1, 0, p->dst_, p->src_, 0, 2, 0, 0);
 
-  VTAUopLoopEnd(*(p->cmdH));
-  VTAUopLoopEnd(*(p->cmdH));
+  VTAUopLoopEnd(cmdh);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
-int alu_max(void *param) {
+int alu_max(void *param,VTACommandHandle cmdh) {
   ResetAcc *p = (ResetAcc *) (param);
-  VTAUopLoopBegin(*(p->cmdH), p->size_, 1, 1, 0);
-  VTAUopPush(*(p->cmdH), 1, 0, p->base_, p->base_, 0, 1, 1, -128);
-  VTAUopLoopEnd(*(p->cmdH));
-  return 0;
-}
-
-int alu_relu(void *param) {
-  ResetAcc *p = (ResetAcc *) (param);
-  VTAUopLoopBegin(*(p->cmdH), p->size_, 1, 1, 0);
-  VTAUopPush(*(p->cmdH), 1, 0, p->base_, p->base_, 0, 1, 1, 0);
-  VTAUopLoopEnd(*(p->cmdH));
+  VTAUopLoopBegin(cmdh, p->size_, 1, 1, 0);
+  VTAUopPush(cmdh, 1, 0, p->base_, p->base_, 0, 1, 1, -128);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
 
-int alu_min(void *param) {
+int alu_relu(void *param,VTACommandHandle cmdh) {
   ResetAcc *p = (ResetAcc *) (param);
-  VTAUopLoopBegin(*(p->cmdH), p->size_, 1, 1, 0);
-  VTAUopPush(*(p->cmdH), 1, 0, p->base_, p->base_, 0, 0, 1, 127);
-  VTAUopLoopEnd(*(p->cmdH));
+  VTAUopLoopBegin(cmdh, p->size_, 1, 1, 0);
+  VTAUopPush(cmdh, 1, 0, p->base_, p->base_, 0, 1, 1, 0);
+  VTAUopLoopEnd(cmdh);
+  return 0;
+}
+
+int alu_min(void *param,VTACommandHandle cmdh) {
+  ResetAcc *p = (ResetAcc *) (param);
+  VTAUopLoopBegin(cmdh, p->size_, 1, 1, 0);
+  VTAUopPush(cmdh, 1, 0, p->base_, p->base_, 0, 0, 1, 127);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
 
@@ -338,7 +344,6 @@ void conv_kernel(uint32_t sizeOutTileH,
       // acc buffer reset
       uint32_t outputSramBaseAddr = threadIdx * ACC_MEM_ENTRY / nVirtualThread;
       ResetAcc reset;
-      reset.cmdH = &vtaCmdH;
       reset.base_ = outputSramBaseAddr;
       reset.size_ = resizedOutTileH * resizedOutTileW * nFilterinLoop;
 
@@ -422,7 +427,6 @@ void conv_kernel(uint32_t sizeOutTileH,
             threadIdx * (WGT_MEM_ENTRY / nVirtualThread);
         VTADepPop(vtaCmdH, 1, 2);
         struct gemmop_mxn gemm_ctx;
-        gemm_ctx.cmdH = &vtaCmdH;
         gemm_ctx.tile_size_h_ = resizedOutTileH;
         gemm_ctx.tile_size_w_ = resizedOutTileW;
         gemm_ctx.src_factor_ = resizedInTileW;
@@ -484,7 +488,6 @@ void conv_kernel(uint32_t sizeOutTileH,
                         3);          // type
 
         AddContext add_ctx;
-        add_ctx.cmdH = &vtaCmdH;
         add_ctx.dst_ = outputSramBaseAddr;
         add_ctx.size_ = resizedOutTileH * resizedOutTileW;
         add_ctx.src_ = sram_offset;
@@ -512,7 +515,6 @@ void conv_kernel(uint32_t sizeOutTileH,
       }
 
       ShiftContext shift_ctx;
-      shift_ctx.cmdH = &vtaCmdH;
       shift_ctx.base_ = outputSramBaseAddr;
       shift_ctx.size_ = resizedOutTileH * resizedOutTileW * nFilterinLoop;
       shift_ctx.shift_ = shift;
@@ -541,7 +543,6 @@ void conv_kernel(uint32_t sizeOutTileH,
       {
         if (!relu) {
           ResetAcc alu_ctx;
-          alu_ctx.cmdH = &vtaCmdH;
           alu_ctx.base_ = outputSramBaseAddr;
           alu_ctx.size_ = resizedOutTileH * resizedOutTileW * nFilterinLoop;
           void **uopHandle_reset;
@@ -563,7 +564,6 @@ void conv_kernel(uint32_t sizeOutTileH,
           VTAPushALUOp(vtaCmdH, uopHandle_reset, &alu_max, &alu_ctx, 0);
         } else {
           ResetAcc alu_ctx;
-          alu_ctx.cmdH = &vtaCmdH;
           alu_ctx.base_ = outputSramBaseAddr;
           alu_ctx.size_ = resizedOutTileH * resizedOutTileW * nFilterinLoop;
           void **uopHandle_reset;
@@ -587,7 +587,6 @@ void conv_kernel(uint32_t sizeOutTileH,
       }
       {
         ResetAcc alu_ctx;
-        alu_ctx.cmdH = &vtaCmdH;
         alu_ctx.base_ = outputSramBaseAddr;
         alu_ctx.size_ = resizedOutTileH * resizedOutTileW * nFilterinLoop;
         void **uopHandle_reset;

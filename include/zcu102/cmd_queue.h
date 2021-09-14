@@ -14,13 +14,13 @@ namespace vta {
  */
 class CommandQueue {
  public:
-  CommandQueue() {
-    this->InitSpace();
+  CommandQueue(int index=0) {
+    this->InitSpace(index);
   }
-  void InitSpace() {
+  void InitSpace(int index) {
     uop_queue_.InitSpace();
     insn_queue_.InitSpace();
-    device_ = VTADeviceAlloc();
+    device_ = VTADeviceAlloc(index);
     CHECK(device_ != nullptr);
   }
 
@@ -220,7 +220,7 @@ class CommandQueue {
   }
 
   void PushGEMMOp(void** uop_handle,
-                  int (*finit)(void*),
+                  int (*finit)(void*,VTACommandHandle),
                   void* signature,
                   int nbytes,
                   bool from_outmem=false) {
@@ -232,7 +232,7 @@ class CommandQueue {
     UopKernel** kptr = uptr[0]->Get(signature, nbytes);
     if (kptr[0] == nullptr) {
       record_kernel_ = new UopKernel(static_cast<char*>(signature), nbytes);
-      CHECK_EQ((*finit)(signature), 0);
+      CHECK_EQ((*finit)(signature,this), 0);
       kptr[0] = static_cast<UopKernel*>(record_kernel_);
 
       if (debug_flag_ & VTA_DEBUG_DUMP_UOP) {
@@ -246,7 +246,7 @@ class CommandQueue {
   }
 
   void PushALUUop(void** uop_handle,
-                  int (*finit)(void*),
+                  int (*finit)(void*,VTACommandHandle),
                   void* signature,
                   int nbytes) {
     UopKernelMap** uptr = reinterpret_cast<UopKernelMap**>(uop_handle);
@@ -257,7 +257,7 @@ class CommandQueue {
     UopKernel** kptr = uptr[0]->Get(signature, nbytes);
     if (kptr[0] == nullptr) {
       record_kernel_ = new UopKernel(static_cast<char*>(signature), nbytes);
-      CHECK_EQ((*finit)(signature), 0);
+      CHECK_EQ((*finit)(signature,this), 0);
       kptr[0] = static_cast<UopKernel*>(record_kernel_);
       if (debug_flag_ & VTA_DEBUG_DUMP_UOP) {
         record_kernel_->Dump();
@@ -268,17 +268,60 @@ class CommandQueue {
     this->CheckInsnOverFlow();
   }
 
-  static std::shared_ptr<CommandQueue>& ThreadLocal() {
-    static std::shared_ptr<CommandQueue> inst =
-        std::make_shared<CommandQueue>();
-    if (inst == nullptr) {
-      inst = std::make_shared<CommandQueue>();
+  static std::shared_ptr<CommandQueue>& ThreadLocal(uint32_t index=0) {
+    
+/*   
+    static std::vector<std::shared_ptr<CommandQueue>> instPtr;
+
+    // init
+    if(instPtr.size()==0) {
+     // printf("----------- vector <cmdqueue> inited -------------- \n");
+      for(int i=0;i<VTA_DEVICE_NUM;i++) {
+        auto k = std::make_shared<CommandQueue>(i);
+        instPtr.push_back(k);
+      }
     }
-    return inst;
+
+    if(index >= VTA_DEVICE_NUM) {
+      index=0;
+    }
+    
+    return instPtr[index];
+    
+*/
+
+    static std::shared_ptr<CommandQueue> inst0 =
+        std::make_shared<CommandQueue>(0);
+    static std::shared_ptr<CommandQueue> inst1 =
+        std::make_shared<CommandQueue>(1);
+    static std::shared_ptr<CommandQueue> inst2 =
+        std::make_shared<CommandQueue>(2);
+    static std::shared_ptr<CommandQueue> inst3 =
+        std::make_shared<CommandQueue>(3);
+
+
+    if (inst0 == nullptr && index==0) {
+      inst0 = std::make_shared<CommandQueue>(0);
+    }
+    if (inst1 == nullptr && index==1) {
+      inst1 = std::make_shared<CommandQueue>(1);
+    }
+    if (inst2 == nullptr && index==2) {
+      inst2 = std::make_shared<CommandQueue>(2);
+    }
+    if (inst3 == nullptr && index==3) {
+      inst3 = std::make_shared<CommandQueue>(3);
+    }
+
+    if(index==0) return inst0;
+    if(index==1) return inst1;
+    if(index==2) return inst2;
+    if(index==3) return inst3;
+    return inst0;
   }
 
-  static void Shutdown() {
-    ThreadLocal().reset();
+  static void Shutdown(int index=0) {
+    ThreadLocal(index).reset();
   }
 
  private:

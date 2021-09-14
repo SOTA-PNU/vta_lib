@@ -61,9 +61,10 @@ typedef uint32_t vta_phy_addr_t;
 
 /*!
  * \brief Allocate a device resource handle
+ * \param index VTA index for multi-vta  
  * \return The device handle.
  */
-VTADeviceHandle VTADeviceAlloc();
+VTADeviceHandle VTADeviceAlloc(int index=0);
 
 /*!
  * \brief Free a device handle

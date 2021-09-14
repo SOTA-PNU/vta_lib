@@ -140,16 +140,79 @@ static int log_count = 0;
 
 //#define PROFILE_ENABLE 0
 
+// device handle
+static VTADeviceHandle createdVTADeviceHandle[VTA_DEVICE_NUM] = {};
+
 
 class VTADevice {
  public:
-  VTADevice() {
+  VTADevice(int index=0) {      
+
+    assert(index < VTA_DEVICE_NUM);
+
+    uint32_t fetch_addr;
+    uint32_t load_addr;
+    uint32_t compute_addr;
+    uint32_t store_addr;
+
+    vta_index_ = index;
+
+    //defautl init
+    fetch_addr=VTA_FETCH_ADDR;
+    load_addr=VTA_LOAD_ADDR;
+    compute_addr=VTA_COMPUTE_ADDR;
+    store_addr=VTA_STORE_ADDR;      
+
+    switch(index) {
+      case 0:
+        fetch_addr=VTA_FETCH_ADDR;
+        load_addr=VTA_LOAD_ADDR;
+        compute_addr=VTA_COMPUTE_ADDR;
+        store_addr=VTA_STORE_ADDR;
+        break;
+      case 1:
+        fetch_addr=VTA_FETCH_ADDR_1;
+        load_addr=VTA_LOAD_ADDR_1;
+        compute_addr=VTA_COMPUTE_ADDR_1;
+        store_addr=VTA_STORE_ADDR_1;      
+      break;
+      case 2:
+        fetch_addr=VTA_FETCH_ADDR_2;
+        load_addr=VTA_LOAD_ADDR_2;
+        compute_addr=VTA_COMPUTE_ADDR_2;
+        store_addr=VTA_STORE_ADDR_2;      
+
+      break;
+      case 3:
+        fetch_addr=VTA_FETCH_ADDR_3;
+        load_addr=VTA_LOAD_ADDR_3;
+        compute_addr=VTA_COMPUTE_ADDR_3;
+        store_addr=VTA_STORE_ADDR_3;      
+
+      break;
+      default:
+        printf("ERROR. no index.");
+
+      break;
+
+    }
+
     // VTA stage handles
-    vta_fetch_handle_ = VTAMapRegister(VTA_FETCH_ADDR);
-    vta_load_handle_ = VTAMapRegister(VTA_LOAD_ADDR);
-    vta_compute_handle_ = VTAMapRegister(VTA_COMPUTE_ADDR);
-    vta_store_handle_ = VTAMapRegister(VTA_STORE_ADDR);
-    vta_axiperfmonitor_handle_ = VTAMapRegister(AXI_PERF_MONITOR);
+    vta_fetch_handle_ = VTAMapRegister(fetch_addr);
+    vta_load_handle_ = VTAMapRegister(load_addr);
+    vta_compute_handle_ = VTAMapRegister(compute_addr);
+    vta_store_handle_ = VTAMapRegister(store_addr);
+    if(PROFILE_ENABLE) {
+      vta_axiperfmonitor_handle_ = VTAMapRegister(AXI_PERF_MONITOR);
+    }
+
+#ifdef VTA_DEBUG_MODE
+    printf("VTA Device created idx=%d\n", index);
+    printf("fetch(%p) = %p\n", vta_fetch_handle_,fetch_addr);
+    printf("load(%p) = %p\n", vta_load_handle_,load_addr);
+    printf("compute(%p) = %p\n", vta_compute_handle_,compute_addr);
+    printf("store(%p) = %p\n", vta_store_handle_,store_addr);
+#endif	
 
     current_event_index_ = 0;
   }
@@ -204,6 +267,14 @@ class VTADevice {
   int Run(vta_phy_addr_t insn_phy_addr,
           uint32_t insn_count,
           uint32_t wait_cycles) {
+
+#ifdef VTA_DEBUG_MODE		  
+	printf("VTA RUN (IDX=%d)\n", vta_index_);
+	printf("insn_phyaddr=%p\n",insn_phy_addr);
+	printf("insn_count=%d\n",insn_count);
+	printf("wait_cycles=%u\n",wait_cycles);
+#endif	
+
     VTAWriteMappedReg(vta_fetch_handle_, VTA_FETCH_INSN_COUNT_OFFSET, insn_count);
     VTAWriteMappedReg(vta_fetch_handle_, VTA_FETCH_INSN_ADDR_OFFSET, insn_phy_addr);
     VTAWriteMappedReg(vta_load_handle_, VTA_LOAD_INP_ADDR_OFFSET, 0);
@@ -212,8 +283,12 @@ class VTADevice {
     VTAWriteMappedReg(vta_compute_handle_, VTA_COMPUTE_BIAS_ADDR_OFFSET, 0);
     VTAWriteMappedReg(vta_store_handle_, VTA_STORE_OUT_ADDR_OFFSET, 0);
 
-    VTAWriteMappedReg(vta_axiperfmonitor_handle_, CONTROL_OFFSET, 2);
-    VTAWriteMappedReg(vta_axiperfmonitor_handle_, CONTROL_OFFSET, 1);
+
+    if(PROFILE_ENABLE) {
+      //VTAWriteMappedReg(vta_axiperfmonitor_handle_, CONTROL_OFFSET, 2);
+      //VTAWriteMappedReg(vta_axiperfmonitor_handle_, CONTROL_OFFSET, 1);
+    }
+    
 
     // VTA start
     VTAWriteMappedReg(vta_fetch_handle_, 0x0, VTA_START);
@@ -296,6 +371,10 @@ class VTADevice {
     return t < wait_cycles ? 0 : 1;
   }
 
+  uint32_t GetIndex() {
+    return vta_index_;
+  }
+
  private:
   // VTA handles (register maps)
   void* vta_fetch_handle_{nullptr};
@@ -306,13 +385,24 @@ class VTADevice {
 
   struct ProfileEvent event_buffer_[1024];
   uint32_t current_event_index_;
+  uint32_t vta_index_;
 };
 
-VTADeviceHandle VTADeviceAlloc() {
-  return new VTADevice();
+VTADeviceHandle VTADeviceAlloc(int index) {
+  printf("devAlloc idx=%d\n",index);
+  if (createdVTADeviceHandle[index] == nullptr) createdVTADeviceHandle[index] = new VTADevice(index);
+  printf("addr = %p\n",createdVTADeviceHandle[index]);  
+  return createdVTADeviceHandle[index];
 }
 
 void VTADeviceFree(VTADeviceHandle handle) {
+  int index = ((VTADevice*)handle)->GetIndex();
+  if(index >= VTA_DEVICE_NUM) {
+    printf("[ERROR] invalid vta device handle: %p. index: %d\n", handle, index);
+    return;
+
+  }
+  createdVTADeviceHandle[index]=nullptr;  
   delete static_cast<VTADevice*>(handle);
 }
 

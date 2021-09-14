@@ -16,7 +16,13 @@
 
 #include <arm_neon.h>
 #include <omp.h>
+
+#if(!VTALIB_ONLY)
 #include "vta/vtalib/include/Bundle/VTABundle.h"
+#else
+#include "Bundle/VTABundle.h"
+#endif
+
 
 #include <arm_compute/core/Types.h>
 #include <arm_compute/core/ITensor.h>
