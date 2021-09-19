@@ -86,21 +86,21 @@ else()
     INCLUDE_DIRECTORIES(include include/zcu102)
     #link_libraries(prebuilt_lib)
     add_library(vta_runtime lib/zcu102/api.cc lib/zcu102/pynq_driver.cc) 
-    link_libraries(arm_compute_graph arm_compute arm_compute_core)
+    #link_libraries(arm_compute_graph arm_compute arm_compute_core)
     add_subdirectory(tests/zcu102)
     #target_link_libraries(gomp)
     #target_link_libraries(vta_runtime lib/acl/libarm_compute_graph-static.a arm_compute lib/acl/libarm_compute-static.a arm_compute lib/acl/libarm_compute_core-static.a)
     
     find_library(EXTERN_ACL_COMPUTE_LIB
-            NAMES arm_compute libarm_compute
+            NAMES arm_compute-static.a libarm_compute-static.a
             HINTS "lib/acl"
             )
     find_library(EXTERN_ACL_COMPUTE_CORE_LIB
-            NAMES arm_compute_core libarm_compute_core
+            NAMES arm_compute_core-static.a libarm_compute_core-static.a
             HINTS "lib/acl"
             )
     find_library(EXTERN_ACL_COMPUTE_GRAPH_LIB
-            NAMES arm_compute_graph libarm_compute_graph
+            NAMES arm_compute_graph-static.a libarm_compute_graph-static.a
             HINTS "lib/acl"
             )
     message(STATUS "Build with Arm Compute Library graph runtime support: "
@@ -131,7 +131,6 @@ else()
     add_definitions(-DPROFILE_ENABLE=0)
 endif()
 target_link_libraries(VTABundle PUBLIC
-        #vta_runtime LLVMSupport pthread glog gflags gomp)
         vta_runtime LLVMSupport pthread glog gflags gomp)
 
 if(NOT NESTC_USE_VTASIM)
