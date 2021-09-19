@@ -35,12 +35,12 @@ void xlnk_reset() {
 
 #define IMM_VAL 2
 
-int mulimm(void* param)
+int mulimm(void* param, VTACommandHandle cmdh)
 {
   int *p = (int*)(param);
-  VTAUopLoopBegin( *p,0,0,0);
-  VTAUopPush(1, 0, 0, 0, 0, 4, 1, IMM_VAL);
-  VTAUopLoopEnd();
+  VTAUopLoopBegin( cmdh, *p,0,0,0);
+  VTAUopPush(cmdh,1, 0, 0, 0, 0, 4, 1, IMM_VAL);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
 int main()
@@ -78,7 +78,7 @@ int main()
   VTALoadBuffer2D(vtaCmdH, input_buf, 0, 1, 1, 1, 0, 0, 0, 0, 0, 3);
 
   int sign = 1;
-  VTAPushALUOp(uopHandle2, &mulimm, &sign, 0);
+  VTAPushALUOp(vtaCmdH, uopHandle2, &mulimm, &sign, 0);
 
   VTADepPush(vtaCmdH,2,3);
   VTADepPop(vtaCmdH,2,3);

@@ -79,7 +79,7 @@ int main()
   VTASetDebugMode(vtaCmdH, 0);
 
 
-  for(int lcnt = 0; lcnt < 1000000; lcnt++) {
+  for(int lcnt = 0; lcnt < 1000; lcnt++) {
     cout<<"LOOP TEST COUNT: "<<lcnt<<endl;
     for (int i = 0; i < 16; i++) {
       input[i] = rand() % 20 - 10;
@@ -109,7 +109,7 @@ int main()
 
 
       // reset acc mem
-      VTAPushGEMMOp(uopHandle1, &finit_gemmgemm, nullptr, 0);
+      VTAPushGEMMOp(vtaCmdH,uopHandle1, &finit_gemmgemm, nullptr, 0);
 
       VTADepPush(vtaCmdH, 2, 1);
 
@@ -121,7 +121,7 @@ int main()
       VTADepPop(vtaCmdH, 1, 2);
 
       // run gemm
-      VTAPushGEMMOp(uopHandle2, &gemm2, nullptr, 0);
+      VTAPushGEMMOp(vtaCmdH, uopHandle2, &gemm2, nullptr, 0);
 
       VTADepPush(vtaCmdH, 2, 3);
 
@@ -139,7 +139,7 @@ int main()
       uopHandle3[0] = nullptr;
 
       // for dependency queue form 3 to 1
-      VTAPushGEMMOp(uopHandle3, &finit_gemmgemm, nullptr, 0);
+      VTAPushGEMMOp(vtaCmdH, uopHandle3, &finit_gemmgemm, nullptr, 0);
       VTADepPush(vtaCmdH, 2, 1);
       VTADepPop(vtaCmdH, 2, 1);
 
@@ -151,7 +151,7 @@ int main()
       uopHandle4[0] = nullptr;
 
       // run gemm
-      VTAPushGEMMOp(uopHandle4, &gemm2, nullptr, 0);
+      VTAPushGEMMOp(vtaCmdH, uopHandle4, &gemm2, nullptr, 0);
 
       VTADepPush(vtaCmdH, 2, 3);
       VTADepPop(vtaCmdH, 2, 3);

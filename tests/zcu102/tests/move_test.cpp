@@ -34,27 +34,27 @@ void xlnk_reset() {
 
 #define IMM_VAL 2
 #define GEMM_VAL 3
-int gemm2(void* param)
+int gemm2(void* param, VTACommandHandle cmdh)
 {
-  VTAUopLoopBegin( 1,1,1,0);
-  VTAUopPush(0, 0, 0, 0, 0, 2, 0, 0);
-  VTAUopLoopEnd();
+  VTAUopLoopBegin( cmdh, 1,1,1,0);
+  VTAUopPush(cmdh, 0, 0, 0, 0, 0, 2, 0, 0);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
 
-int mulimm(void* param)
+int mulimm(void* param, VTACommandHandle cmdh)
 {
-  VTAUopLoopBegin( 1,0,0,0);
-  VTAUopPush(1, 0, 0, 0, 0, 4, 1, IMM_VAL);
-  VTAUopLoopEnd();
+  VTAUopLoopBegin( cmdh, 1,0,0,0);
+  VTAUopPush(cmdh, 1, 0, 0, 0, 0, 4, 1, IMM_VAL);
+  VTAUopLoopEnd(cmdh);
   return 0;
 }
 
-int initacc(void* param)
+int initacc(void* param, VTACommandHandle cmdh)
 {
-  VTAUopLoopBegin( 1024,1,0,0);
-  VTAUopPush(0, 1, 0, 0, 0, 2, 0,0);
-  VTAUopLoopEnd();
+  VTAUopLoopBegin(cmdh,  1024,1,0,0);
+  VTAUopPush(cmdh, 0, 1, 0, 0, 0, 2, 0,0);
+  VTAUopLoopEnd(cmdh);
   return 0;
 
 }
@@ -108,7 +108,7 @@ int main()
   VTALoadBuffer2D(vtaCmdH, input_buf, 0, 1, 1, 1, 0, 0, 0, 0, 0, 3);
 
   int sign = 1;
-  VTAPushALUOp(uopHandle2, &mulimm, &sign, 0);
+  VTAPushALUOp(vtaCmdH, uopHandle2, &mulimm, &sign, 0);
 
   // Move instruction
   int src_addr=0;
@@ -118,7 +118,7 @@ int main()
   // init Acc mem
   void* uopHandle_init[2];
   uopHandle_init[0]=nullptr;
-  VTAPushGEMMOp(uopHandle_init, &initacc, nullptr, 0);
+  VTAPushGEMMOp(vtaCmdH, uopHandle_init, &initacc, nullptr, 0);
 
 
 
@@ -136,7 +136,7 @@ int main()
   // GEMM using moved inp mem
   void* uopHandle3[2];
   uopHandle3[0]=nullptr;
-  VTAPushGEMMOp(uopHandle3, &gemm2, nullptr, 0);
+  VTAPushGEMMOp(vtaCmdH, uopHandle3, &gemm2, nullptr, 0);
 
 
 

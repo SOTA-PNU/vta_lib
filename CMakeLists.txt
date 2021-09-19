@@ -8,12 +8,13 @@ option(NESTC_EVTA_DEBUG "Debug mode for EVTA library" OFF)
 option(NESTC_EVTA_PROFILE "Profile mode for EVTA HW" OFF)
 INCLUDE_DIRECTORIES(include 3rdparty/dlpack/include)
 INCLUDE_DIRECTORIES(include 3rdparty/dmlc-core/include)
+option(VTALIB_WITHOUT_NESTC "use VTALIB_ONLY running without nest-c" OFF)
+option(NESTC_EVTA_MULTI "use Multi-EVTA" OFF)
 
 #use VTALIB_ONLY running without nest-c
-add_definitions(-DVTALIB_ONLY=1)
-
-SET(NESTC_EVTA_RUN_WITH_GENERIC_BUNDLE 0)
-SET(NESTC_EVTA_RUN_ON_ZCU102 1)
+if(VTALIB_WITHOUT_NESTC)
+    add_definitions(-DVTALIB_ONLY=1)
+endif()
 
 if(NOT NESTC_EVTA_RUN_ON_ZCU102)
     message(STATUS "VTALIB with Simulator")
@@ -33,9 +34,6 @@ else()
             -DVTA_LOG_BATCH=0
             -DVTA_LOG_BLOCK=4
             -DVTA_LOG_UOP_BUFF_SIZE=16
-            -DVTA_LOG_INP_BUFF_SIZE=15
-            -DVTA_LOG_WGT_BUFF_SIZE=18
-            -DVTA_LOG_ACC_BUFF_SIZE=17
             -DVTA_LOG_BLOCK_IN=4
             -DVTA_LOG_BLOCK_OUT=4
             -DVTA_LOG_OUT_WIDTH=3
@@ -70,6 +68,16 @@ else()
             -DVTA_STORE_OUT_ADDR_OFFSET=16
             -DVTA_COHERENT_ACCESSES=true
             -Dvta_EXPORTS)
+    if(NESTC_EVTA_MULTI)
+    add_definitions(-DVTA_LOG_INP_BUFF_SIZE=15
+            -DVTA_LOG_WGT_BUFF_SIZE=18
+            -DVTA_LOG_ACC_BUFF_SIZE=17)
+    else()
+        add_definitions(-DVTA_LOG_INP_BUFF_SIZE=16
+                -DVTA_LOG_WGT_BUFF_SIZE=19
+                -DVTA_LOG_ACC_BUFF_SIZE=18)
+    endif()
+
     if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
         add_compile_options(-std=c++14 -faligned-new -O0 -g -Wall -fPIC  -fPIC  -Wno-psabi)
     else()

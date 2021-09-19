@@ -49,11 +49,11 @@ namespace sim_test_conv13 {
     uint32_t size_;
   };
 
-  int reset_acc(void *param) {
+  int reset_acc(void *param, VTACommandHandle cmdh) {
     ResetAcc *p = (ResetAcc *) (param);
-    VTAUopLoopBegin(p->size_, 1, 0, 0);
-    VTAUopPush(0, 1, p->base_, 0, 0, 0, 0, 0);
-    VTAUopLoopEnd();
+    VTAUopLoopBegin(cmdh, p->size_, 1, 0, 0);
+    VTAUopPush(cmdh, 0, 1, p->base_, 0, 0, 0, 0, 0);
+    VTAUopLoopEnd(cmdh);
     return 0;
   }
 
@@ -66,19 +66,19 @@ namespace sim_test_conv13 {
     uint32_t stride_h_;
     uint32_t stride_w_;
   };
-  int gemmop_mxn(void *param) {
+  int gemmop_mxn(void *param, VTACommandHandle cmdh) {
 
     struct gemmop_mxn *ctx = (struct gemmop_mxn *) (param);
-    VTAUopLoopBegin(ctx->tile_size_h_, ctx->tile_size_w_, ctx->src_factor_ * ctx->stride_h_, 0);
-    VTAUopLoopBegin(ctx->kernel_h_, 0, ctx->src_factor_, ctx->kernel_w_);
+    VTAUopLoopBegin(cmdh, ctx->tile_size_h_, ctx->tile_size_w_, ctx->src_factor_ * ctx->stride_h_, 0);
+    VTAUopLoopBegin(cmdh, ctx->kernel_h_, 0, ctx->src_factor_, ctx->kernel_w_);
 
     for (int dx = 0; dx < ctx->kernel_w_; dx++) {
       for (int j = 0; j < ctx->tile_size_w_; j++) {
-        VTAUopPush(0, 0, j, j*ctx->stride_w_ + dx, dx, 0, 0, 0);
+        VTAUopPush(cmdh, 0, 0, j, j*ctx->stride_w_ + dx, dx, 0, 0, 0);
       }
     }
-    VTAUopLoopEnd();
-    VTAUopLoopEnd();
+    VTAUopLoopEnd(cmdh);
+    VTAUopLoopEnd(cmdh);
 
     return 0;
   }
@@ -89,11 +89,11 @@ namespace sim_test_conv13 {
     uint32_t size_;
     uint8_t shift_;
   };
-  int alu_shr(void *param) {
+  int alu_shr(void *param, VTACommandHandle cmdh) {
     ShiftContext *p = (ShiftContext *) (param);
-    VTAUopLoopBegin(p->size_, 1, 1, 0);
-    VTAUopPush(1, 0, p->base_, 0, 0, 3, 1, p->shift_);
-    VTAUopLoopEnd();
+    VTAUopLoopBegin(cmdh, p->size_, 1, 1, 0);
+    VTAUopPush(cmdh, 1, 0, p->base_, 0, 0, 3, 1, p->shift_);
+    VTAUopLoopEnd(cmdh);
     return 0;
   }
 
@@ -102,34 +102,34 @@ namespace sim_test_conv13 {
     uint32_t src_;
     uint32_t size_;
   };
-  int alu_add(void *param) {
+  int alu_add(void *param, VTACommandHandle cmdh) {
     AddContext *p = (AddContext *) (param);
-    VTAUopLoopBegin(p->size_, 1, 0, 0);
-    VTAUopPush(1, 0, p->dst_, p->src_, 0, 2, 0, 0);
-    VTAUopLoopEnd();
+    VTAUopLoopBegin(cmdh, p->size_, 1, 0, 0);
+    VTAUopPush(cmdh, 1, 0, p->dst_, p->src_, 0, 2, 0, 0);
+    VTAUopLoopEnd(cmdh);
     return 0;
   }
-  int alu_max(void *param) {
+  int alu_max(void *param, VTACommandHandle cmdh) {
     ResetAcc *p = (ResetAcc *) (param);
-    VTAUopLoopBegin(p->size_, 1, 1, 0);
-    VTAUopPush(1, 0, p->base_, 0, 0, 1, 1, -128);
-    VTAUopLoopEnd();
-    return 0;
-  }
-
-  int alu_relu(void *param) {
-    ResetAcc *p = (ResetAcc *) (param);
-    VTAUopLoopBegin(p->size_, 1, 1, 0);
-    VTAUopPush(1, 0, p->base_, 0, 0, 1, 1, 0);
-    VTAUopLoopEnd();
+    VTAUopLoopBegin(cmdh, p->size_, 1, 1, 0);
+    VTAUopPush(cmdh, 1, 0, p->base_, 0, 0, 1, 1, -128);
+    VTAUopLoopEnd(cmdh);
     return 0;
   }
 
-  int alu_min(void *param) {
+  int alu_relu(void *param, VTACommandHandle cmdh) {
     ResetAcc *p = (ResetAcc *) (param);
-    VTAUopLoopBegin(p->size_, 1, 1, 0);
-    VTAUopPush(1, 0, p->base_, 0, 0, 0, 1, 127);
-    VTAUopLoopEnd();
+    VTAUopLoopBegin(cmdh, p->size_, 1, 1, 0);
+    VTAUopPush(cmdh, 1, 0, p->base_, 0, 0, 1, 1, 0);
+    VTAUopLoopEnd(cmdh);
+    return 0;
+  }
+
+  int alu_min(void *param, VTACommandHandle cmdh) {
+    ResetAcc *p = (ResetAcc *) (param);
+    VTAUopLoopBegin(cmdh, p->size_, 1, 1, 0);
+    VTAUopPush(cmdh, 1, 0, p->base_, 0, 0, 0, 1, 127);
+    VTAUopLoopEnd(cmdh);
     return 0;
   }
 
@@ -207,7 +207,7 @@ namespace sim_test_conv13 {
       ResetAcc reset;
       reset.base_ = 0;
       reset.size_ = resizedOutTileH * resizedOutTileW;
-      VTAPushGEMMOp(uopHandle_reset, &reset_acc, &reset, 0);
+      VTAPushGEMMOp(vtaCmdH, uopHandle_reset, &reset_acc, &reset, 0);
 
       uint32_t inputWOffset = (int) (outputWOffset * stride_size - pad_size ) < 0 ? 0 : outputWOffset * stride_size - pad_size;
       uint32_t inputHOffset = (int) (outputHOffset * stride_size - pad_size ) < 0 ? 0 : outputHOffset * stride_size - pad_size;
@@ -256,7 +256,7 @@ namespace sim_test_conv13 {
         gemm_ctx.stride_h_ = stride_size;
         gemm_ctx.stride_w_ = stride_size;
 
-        VTAPushGEMMOp(uopHandle_gemm, &gemmop_mxn, &gemm_ctx, 0);
+        VTAPushGEMMOp(vtaCmdH, uopHandle_gemm, &gemmop_mxn, &gemm_ctx, 0);
 
 
 
@@ -285,7 +285,7 @@ namespace sim_test_conv13 {
         add_ctx.src_ = resizedOutTileH * resizedOutTileW;
         void *uopHandle_add[2];
         uopHandle_add[0] = nullptr;
-        VTAPushALUOp(uopHandle_add, &alu_add, &add_ctx, 0);
+        VTAPushALUOp(vtaCmdH, uopHandle_add, &alu_add, &add_ctx, 0);
 
 
       }
@@ -299,20 +299,20 @@ namespace sim_test_conv13 {
 
       void *uopHandle_shr[2];
       uopHandle_shr[0] = nullptr;
-      VTAPushALUOp(uopHandle_shr, &alu_shr, &shift_ctx, 0);
+      VTAPushALUOp(vtaCmdH, uopHandle_shr, &alu_shr, &shift_ctx, 0);
 
 
       void *uopHandle_max[2];
       uopHandle_max[0] = nullptr;
       if(!relu) {
-        VTAPushALUOp(uopHandle_max, &alu_max, &reset, 0);
+        VTAPushALUOp(vtaCmdH, uopHandle_max, &alu_max, &reset, 0);
       }
       else{
-        VTAPushALUOp(uopHandle_max, &alu_relu, &reset, 0);
+        VTAPushALUOp(vtaCmdH, uopHandle_max, &alu_relu, &reset, 0);
       }
       void *uopHandle_min[2];
       uopHandle_min[0] = nullptr;
-      VTAPushALUOp(uopHandle_min, &alu_min, &reset, 0);
+      VTAPushALUOp(vtaCmdH, uopHandle_min, &alu_min, &reset, 0);
 
 
       VTADepPush(vtaCmdH, 2, 3);

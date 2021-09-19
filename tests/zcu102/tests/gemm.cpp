@@ -14,7 +14,7 @@
 
 #include <time.h>
 
-#define EVTA_ID 3
+#define EVTA_ID 0
 #define GEMM_VAL 2
 
 #define INP_IDX 8
