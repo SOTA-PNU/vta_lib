@@ -389,9 +389,13 @@ class VTADevice {
 };
 
 VTADeviceHandle VTADeviceAlloc(int index) {
+#ifdef VTA_DEBUG_MODE
   printf("devAlloc idx=%d\n",index);
+#endif
   if (createdVTADeviceHandle[index] == nullptr) createdVTADeviceHandle[index] = new VTADevice(index);
-  printf("addr = %p\n",createdVTADeviceHandle[index]);  
+#ifdef VTA_DEBUG_MODE
+  printf("addr = %p\n",createdVTADeviceHandle[index]);
+#endif
   return createdVTADeviceHandle[index];
 }
 

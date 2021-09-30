@@ -290,14 +290,10 @@ class CommandQueue {
     
 */
 
-    static std::shared_ptr<CommandQueue> inst0 =
-        std::make_shared<CommandQueue>(0);
-    static std::shared_ptr<CommandQueue> inst1 =
-        std::make_shared<CommandQueue>(1);
-    static std::shared_ptr<CommandQueue> inst2 =
-        std::make_shared<CommandQueue>(2);
-    static std::shared_ptr<CommandQueue> inst3 =
-        std::make_shared<CommandQueue>(3);
+    static std::shared_ptr<CommandQueue> inst0;
+    static std::shared_ptr<CommandQueue> inst1;
+    static std::shared_ptr<CommandQueue> inst2;
+    static std::shared_ptr<CommandQueue> inst3;
 
 
     if (inst0 == nullptr && index==0) {
