@@ -58,6 +58,13 @@ int transpose(int8_t *input, int8_t *output, dim_t inDim0, dim_t inDim1, dim_t i
               dim_t outDim0, dim_t outDim1, dim_t outDim2, dim_t outDim3,
               unsigned_t shf0, unsigned_t shf1, unsigned_t shf2, unsigned_t shf3);
 
+int transpose_6dim(int8_t *input, int8_t *output, dim_t inDim0, dim_t inDim1, dim_t inDim2, dim_t inDim3, dim_t inDim4, dim_t inDim5,
+                   dim_t outDim0, dim_t outDim1, dim_t outDim2, dim_t outDim3, dim_t outDim4, dim_t outDim5,
+                   unsigned_t shf0, unsigned_t shf1, unsigned_t shf2, unsigned_t shf3, unsigned_t shf4, unsigned_t shf5);
+
+int8_t* at6dim(int8_t *input, dim_t dim0, dim_t dim1, dim_t dim2, dim_t dim3, dim_t dim4, dim_t dim5,
+               dim_t loc0, dim_t loc1, dim_t loc2, dim_t loc3 , dim_t loc4 , dim_t loc5);
+
 int elemadd(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size);
 

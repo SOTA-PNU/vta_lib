@@ -562,6 +562,158 @@ int transpose(int8_t *input, int8_t *output, dim_t inDim0, dim_t inDim1, dim_t i
         }
   return 0;
 }
+int8_t* at6dim(int8_t *input, dim_t dim0, dim_t dim1, dim_t dim2, dim_t dim3, dim_t dim4, dim_t dim5,
+               dim_t loc0, dim_t loc1, dim_t loc2, dim_t loc3 , dim_t loc4 , dim_t loc5){
+    dim_t index = loc0*dim1*dim2*dim3*dim4*dim5 +
+            loc1*dim2*dim3*dim4*dim5 +
+            loc2*dim3*dim4*dim5 +
+            loc3*dim4*dim5 +
+            loc4*dim5 +
+            loc5;
+    return (input + index);
+}
+
+int transpose_6dim(int8_t *input, int8_t *output, dim_t inDim0, dim_t inDim1, dim_t inDim2, dim_t inDim3, dim_t inDim4, dim_t inDim5,
+                   dim_t outDim0, dim_t outDim1, dim_t outDim2, dim_t outDim3, dim_t outDim4, dim_t outDim5,
+                   unsigned_t shf0, unsigned_t shf1, unsigned_t shf2, unsigned_t shf3, unsigned_t shf4, unsigned_t shf5) {
+    dim_t i0, j0, k0, l0, m0, n0;
+    dim_t *i1, *j1, *k1, *l1, *m1, *n1;
+
+    switch (shf0) {
+        case 0:
+            i1 = &i0;
+            break;
+        case 1:
+            i1 = &j0;
+            break;
+        case 2:
+            i1 = &k0;
+            break;
+        case 3:
+            i1 = &l0;
+            break;
+        case 4:
+            i1 = &m0;
+            break;
+        case 5:
+            i1 = &n0;
+            break;
+    }
+    switch (shf1) {
+        case 0:
+            j1 = &i0;
+            break;
+        case 1:
+            j1 = &j0;
+            break;
+        case 2:
+            j1 = &k0;
+            break;
+        case 3:
+            j1 = &l0;
+            break;
+        case 4:
+            j1 = &m0;
+            break;
+        case 5:
+            j1 = &n0;
+            break;
+    }
+    switch (shf2) {
+        case 0:
+            k1 = &i0;
+            break;
+        case 1:
+            k1 = &j0;
+            break;
+        case 2:
+            k1 = &k0;
+            break;
+        case 3:
+            k1 = &l0;
+            break;
+        case 4:
+            k1 = &m0;
+            break;
+        case 5:
+            k1 = &n0;
+            break;
+    }
+    switch (shf3) {
+        case 0:
+            l1 = &i0;
+            break;
+        case 1:
+            l1 = &j0;
+            break;
+        case 2:
+            l1 = &k0;
+            break;
+        case 3:
+            l1 = &l0;
+            break;
+        case 4:
+            l1 = &m0;
+            break;
+        case 5:
+            l1 = &n0;
+            break;
+    }
+    switch (shf4) {
+        case 0:
+            m1 = &i0;
+            break;
+        case 1:
+            m1 = &j0;
+            break;
+        case 2:
+            m1 = &k0;
+            break;
+        case 3:
+            m1 = &l0;
+            break;
+        case 4:
+            m1 = &m0;
+            break;
+        case 5:
+            m1 = &n0;
+            break;
+    }
+    switch (shf5) {
+        case 0:
+            n1 = &i0;
+            break;
+        case 1:
+            n1 = &j0;
+            break;
+        case 2:
+            n1 = &k0;
+            break;
+        case 3:
+            n1 = &l0;
+            break;
+        case 4:
+            n1 = &m0;
+            break;
+        case 5:
+            n1 = &n0;
+            break;
+    }
+
+    for(i0 = 0; i0 < inDim0; i0++)
+        for(j0 = 0; j0 < inDim1; j0++)
+            for(k0 = 0; k0 < inDim2; k0++)
+                for(l0 = 0; l0 < inDim3; l0++)
+                    for(m0 = 0; m0 < inDim4; m0++)
+                        for(n0 = 0; n0 < inDim5; n0++){
+                            int8_t* dst = at6dim(output, outDim0, outDim1, outDim2, outDim3,
+                                             outDim4, outDim5, *i1, *j1, *k1, *l1, *m1, *n1);
+                            int8_t* src = at6dim(input, inDim0, inDim1, inDim2, inDim3,
+                                                 inDim4, inDim5, i0, j0, k0, l0, m0, n0);
+                            *dst = *src;
+                        }
+    return 0;
+}
 
 int elemadd(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size) {
