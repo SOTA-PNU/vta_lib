@@ -79,7 +79,7 @@ else()
     endif()
 
     if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-        add_compile_options(-std=c++14 -faligned-new -O0 -g -Wall -fPIC  -fPIC  -Wno-psabi)
+        add_compile_options(-std=c++14 -faligned-new -O0 -g -Wall -fPIC -static -fopenmp  -Wno-psabi  -mtune=cortex-a53 -march=armv8-a+crc -ftree-vectorize)
     else()
         add_compile_options(-std=c++14 -faligned-new -O3 -Wall -fPIC  -static -fopenmp  -Wno-psabi -mtune=cortex-a53 -march=armv8-a+crc -ftree-vectorize)
     endif()
