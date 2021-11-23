@@ -33,6 +33,30 @@ using namespace std;
 #define OUT_TILE_SIZE_W 14
 #define OUT_TILE_SIZE_H 14
 
+//#define PROFILE_AUTOTUNE
+#ifdef PROFILE_AUTOTUNE
+uint32_t f0 = 0;
+uint32_t f1 = 0;
+uint32_t f2 = 0;
+uint32_t f3 = 0;
+uint32_t f4 = 0;
+uint32_t f5 = 0;
+uint32_t f6 = 0;
+uint32_t f7 = 0;
+uint32_t f8 = 0;
+uint32_t f9 = 0;
+uint32_t f10 = 0;
+uint32_t f11 = 0;
+uint32_t f12 = 0;
+uint32_t f13 = 0;
+uint32_t f14 = 0;
+uint32_t f15 = 0;
+uint32_t f16 = 0;
+uint32_t f17 = 0;
+uint32_t b0 = 0;
+#endif
+
+
 
 void xlnk_reset() {
 #if(!(NESTC_USE_VTASIM==1))
@@ -317,6 +341,10 @@ void conv_kernel(uint32_t sizeOutTileH,
   for(;nFilterinLoop>0;nFilterinLoop--){
     if((KN/16) % (nFilterinLoop*nVirtualThread) ==0) break;
   }
+#ifdef PROFILE_AUTOTUNE
+  f7 = nFilterinLoop;
+  f8 = KN / nFilterinLoop / nVirtualThread / 16;
+#endif
 
   for (uint32_t filterIdx = 0; filterIdx < KN / nFilterinLoop / nVirtualThread / 16; filterIdx++) {
     uint32_t outDummyH = 0;
@@ -338,7 +366,18 @@ void conv_kernel(uint32_t sizeOutTileH,
       resizedInTileW = (resizedOutTileW - 1) * stride_size + KW;
       inDummyW = resizedInTileW - sizeInTileW;
     }
-
+#ifdef PROFILE_AUTOTUNE
+    if(b0==0){
+      f9 = outDummyH;
+      f11 = resizedOutTileH;
+      f12 = resizedInTileH;
+    }
+    else{
+      f10 = outDummyH;
+      f13 = resizedOutTileH;
+      f14 = resizedInTileH;
+    }
+#endif
     // Push operations for resetting Acc memory
     for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
       // acc buffer reset
@@ -406,14 +445,17 @@ void conv_kernel(uint32_t sizeOutTileH,
         uint32_t weightSramBaseAddr =
             threadIdx * (WGT_MEM_ENTRY / nVirtualThread);
         VTADepPop(vtaCmdH, 2, 1);
-        if(threadIdx==0)
+        if(threadIdx==0) {
+#ifdef PROFILE_AUTOTUNE
+          f15 ++;
+#endif
           VTALoadBuffer2D(vtaCmdH, vta_input_buf, src_offset, x_size, y_size,
                           inputWStride, x_pad_before, y_pad_before,
                           resizedInTileW - x_pad_before - x_size,
                           resizedInTileH - y_pad_before - y_size,
                           inputSramBaseAddr, // index
                           2);                // type
-
+        }
         VTALoadBuffer2D(vtaCmdH, vta_filter_buf, filter_offset, KH * KW,
                         nFilterinLoop, KH * KW * numInputChannel / 16, 0, 0, 0,
                         0, weightSramBaseAddr, 1);
@@ -462,6 +504,10 @@ void conv_kernel(uint32_t sizeOutTileH,
           VTAPushGEMMOp(vtaCmdH, uopHandle_gemm, &gemmop_mxn, &gemm_ctx, 0);
         else
           VTAPushGEMMOp(vtaCmdH, uopHandle_gemm, &gemmop_1x1, &gemm_ctx, 0);
+#ifdef PROFILE_AUTOTUNE
+        f16 ++;
+#endif
+
         VTADepPush(vtaCmdH, 2, 1);
       }
     }
@@ -618,7 +664,9 @@ void conv_kernel(uint32_t sizeOutTileH,
 
       if (outDummyW == 0) {
         for (uint32_t fIdx = 0; fIdx < nFilterinLoop; fIdx++) {
-
+#ifdef PROFILE_AUTOTUNE
+          f17 ++;
+#endif
           VTAStoreBuffer2D(
               vtaCmdH,
               outputSramBaseAddr + fIdx * resizedOutTileH * resizedOutTileW, 4,
@@ -630,6 +678,9 @@ void conv_kernel(uint32_t sizeOutTileH,
         }
       } else {
         for (int hIdx = 0; hIdx < sizeOutTileH * nFilterinLoop; hIdx++) {
+#ifdef PROFILE_AUTOTUNE
+          f17 ++;
+#endif
           VTAStoreBuffer2D(vtaCmdH, outputSramBaseAddr + hIdx * resizedOutTileW,
                            4, vta_output_buf,
                            (filterIdx * nVirtualThread + threadIdx) *
@@ -1326,6 +1377,30 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
   nTileW = out_w / sizeOutTileW + isRemainTileW;
   nTileH = out_h / sizeOutTileH + isRemainTileH;
 
+#ifdef PROFILE_AUTOTUNE
+  f0 = sizeOutTileW;
+  f1 = sizeOutTileH;
+  f2 = sizeInTileW;
+  f3 = sizeInTileH;
+  f4 = nTileW;
+  f5 = nTileH;
+
+  f6 = 0;
+  f7 = 0;
+  f8 = 0;
+  f9 = 0;
+  f10 = 0;
+  f11 = 0;
+  f12 = 0;
+  f13 = 0;
+  f14 = 0;
+  f15 = 0;
+  f16 = 0;
+  f17 = 0;
+  b0 = 0;
+
+#endif
+
   //VTASetDebugMode(vtaCmdH, VTA_DEBUG_DUMP_INSN | VTA_DEBUG_DUMP_UOP);
   VTASetDebugMode(vtaCmdH, 0);
 #ifdef VTA_DEBUG_MODE
@@ -1348,6 +1423,9 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
       }
 
       if ((tileWIdx != nTileW - 1)) {
+#ifdef PROFILE_AUTOTUNE
+        b0 = 0;
+#endif
         conv_kernel(resizedOutTileH, sizeOutTileW, pad_size, stride_size,
                     x_pad_before, x_pad_after, y_pad_before, y_pad_after,
                     outputWOffset, outputHOffset, resizedInTileH, sizeInTileW,
@@ -1356,6 +1434,10 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
                     vtaCmdH, idEVTA, nVirtualThread);
       } else {
         uint32_t sizeOutTileBoundaryW = out_w - tileWIdx * sizeOutTileW;
+#ifdef PROFILE_AUTOTUNE
+        b0 = 1;
+        f6 = sizeOutTileBoundaryW;
+#endif
         uint32_t sizeInTileBoundaryW =
             (sizeOutTileBoundaryW - 1) * stride_size + KW;
         conv_kernel(resizedOutTileH, sizeOutTileBoundaryW, pad_size,
@@ -1455,6 +1537,28 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
 #endif
     free(transposed_output);
   }
+#endif
+
+
+#ifdef PROFILE_AUTOTUNE
+  std::cout<<f0<<std::endl;
+  std::cout<<f1<<std::endl;
+  std::cout<<f2<<std::endl;
+  std::cout<<f3<<std::endl;
+  std::cout<<f4<<std::endl;
+  std::cout<<f5<<std::endl;
+  std::cout<<f6<<std::endl;
+  std::cout<<f7<<std::endl;
+  std::cout<<f8<<std::endl;
+  std::cout<<f9<<std::endl;
+  std::cout<<f10<<std::endl;
+  std::cout<<f11<<std::endl;
+  std::cout<<f12<<std::endl;
+  std::cout<<f13<<std::endl;
+  std::cout<<f14<<std::endl;
+  std::cout<<f15<<std::endl;
+  std::cout<<f16<<std::endl;
+  std::cout<<f17<<std::endl;
 #endif
   return 0;
 }
