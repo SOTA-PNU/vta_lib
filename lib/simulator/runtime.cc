@@ -400,6 +400,7 @@ class UopQueue : public BaseQueue<VTAUop> {
     uint32_t uop_begin = 0;
     if (sram_end_ + num_op > kMaxNumUop) {
       // Need to evict
+      printf("warning: EVTA uop buffer overflowed. No longer uop instruction can be reused.\n");
       cache_idx_ = 0;
       sram_begin_ = 0;
       sram_end_ = num_op;
@@ -451,6 +452,11 @@ class UopQueue : public BaseQueue<VTAUop> {
     cache_.clear();
     cache_idx_ = 0;
     BaseQueue<VTAUop>::Reset();
+  }
+  void UopReset() {
+    cache_idx_ = 0;
+    sram_begin_ = 0;
+    sram_end_ = 0;
   }
   void AutoReadBarrier() {
     ReadBarrier();
@@ -1240,6 +1246,10 @@ class CommandQueue {
     ThreadLocal(index).reset();
   }
 
+  void ResetUopQueue(){
+    uop_queue_.UopReset();
+  }
+
  private:
   // Push GEMM uop to the command buffer
   void PushGEMMOp(UopKernel* kernel) {
@@ -1556,4 +1566,8 @@ void VTAPrintEnv() {
 
             //printf("VTA_LOG_BUS_WIDTH",VTA_LOG_BUS_WIDTH);
             printf("VTA_DEVICE_NUM=%d\n",VTA_DEVICE_NUM);
+}
+
+void VTAUopBufferReset(VTACommandHandle cmdH) {
+  static_cast<vta::CommandQueue*>(cmdH)->ResetUopQueue();
 }

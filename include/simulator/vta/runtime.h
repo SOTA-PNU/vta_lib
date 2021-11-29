@@ -296,7 +296,7 @@ TVM_DLL void VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles);
 * \brief print vta env defines
  */
 void VTAPrintEnv();
-
+void VTAUopBufferReset(VTACommandHandle cmdH);
 #ifdef __cplusplus
 }
 #endif

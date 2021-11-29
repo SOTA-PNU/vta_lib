@@ -202,3 +202,7 @@ void VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles) {
   static_cast<vta::CommandQueue*>(cmd)->
       Synchronize(wait_cycles);
 }
+
+void VTAUopBufferReset(VTACommandHandle cmdH) {
+  static_cast<vta::CommandQueue*>(cmdH)->ResetUopQueue();
+}

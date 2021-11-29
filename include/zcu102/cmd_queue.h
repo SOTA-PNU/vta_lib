@@ -320,6 +320,10 @@ class CommandQueue {
     ThreadLocal(index).reset();
   }
 
+  void ResetUopQueue(){
+    uop_queue_.UopReset();
+  }
+
  private:
   // Push GEMM uop to the command buffer
   void PushGEMMOp(UopKernel* kernel, bool from_outmem=false) {

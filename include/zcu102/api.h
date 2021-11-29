@@ -90,3 +90,4 @@ int VTADepPush(VTACommandHandle cmd, int from_qid, int to_qid) ;
 
 int VTADepPop(VTACommandHandle cmd, int from_qid, int to_qid) ;
 void VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles);
+void VTAUopBufferReset(VTACommandHandle cmdH);
