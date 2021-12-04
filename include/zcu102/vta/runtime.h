@@ -294,7 +294,7 @@ TVM_DLL int VTADepPop(VTACommandHandle cmd, int from_qid, int to_qid);
  *
  */
 TVM_DLL void VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles);
-
+void VTAUopBufferReset(VTACommandHandle cmdH);
 #ifdef __cplusplus
 }
 #endif
