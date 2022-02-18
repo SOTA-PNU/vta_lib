@@ -345,12 +345,12 @@ void conv_kernel(uint32_t sizeOutTileH,
   f7 = nFilterinLoop;
   f8 = KN / nFilterinLoop / nVirtualThread / 16;
 #endif
-
-  for (uint32_t filterIdx = 0; filterIdx < KN / nFilterinLoop / nVirtualThread / 16; filterIdx++) {
     uint32_t outDummyH = 0;
     uint32_t inDummyH = 0;
     uint32_t outDummyW = 0;
     uint32_t inDummyW = 0;
+
+  for (uint32_t filterIdx = 0; filterIdx < KN / nFilterinLoop / nVirtualThread / 16; filterIdx++) {
 
     uint32_t inputSramPtr = 0;
     if (resizedOutTileH < MIN_H_SIZE) {
@@ -677,16 +677,18 @@ void conv_kernel(uint32_t sizeOutTileH,
               sizeOutTileW, sizeOutTileH, out_w);
         }
       } else {
-        for (int hIdx = 0; hIdx < sizeOutTileH * nFilterinLoop; hIdx++) {
+        for (int fIdx = 0; fIdx < nFilterinLoop; fIdx++) {
+          for (int hIdx = 0; hIdx < sizeOutTileH; hIdx++) {
 #ifdef NESTC_EVTA_PROFILE_AUTOTUNE
           f17 ++;
 #endif
-          VTAStoreBuffer2D(vtaCmdH, outputSramBaseAddr + hIdx * resizedOutTileW,
-                           4, vta_output_buf,
-                           (filterIdx * nVirtualThread + threadIdx) *
-                           nFilterinLoop * out_w * out_h +
-                           (outputHOffset + hIdx) * out_w + outputWOffset,
-                           sizeOutTileW, 1, out_w);
+            VTAStoreBuffer2D(vtaCmdH, outputSramBaseAddr + (hIdx+fIdx*sizeOutTileH) * resizedOutTileW + fIdx * outDummyH * resizedOutTileH,
+                             4, vta_output_buf,
+                             ((filterIdx+fIdx) * nVirtualThread + threadIdx) *
+                                 out_w * out_h +
+                                 (outputHOffset + hIdx) * out_w + outputWOffset,
+                             sizeOutTileW, 1, out_w);
+          }
         }
       }
       VTADepPush(vtaCmdH, 3, 2);

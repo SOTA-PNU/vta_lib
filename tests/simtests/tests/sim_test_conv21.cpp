@@ -1,8 +1,8 @@
 #define MIN_W_SIZE 5
 #define MIN_H_SIZE 5
-#define OUT_TILE_SIZE_W 56
-#define OUT_TILE_SIZE_H 8
-#define NTHREAD 2
+#define OUT_TILE_SIZE_W 14
+#define OUT_TILE_SIZE_H 14
+#define NTHREAD 1
 #include <iostream>
 #include <cstring>
 #include <cstdint>
@@ -18,7 +18,7 @@
 using namespace std;
 
 namespace sim_test_conv21 {
-#define EVTA_ID 2
+#define EVTA_ID 0
 
 int getTileH(int H, int outH){
   int tileH = 0;
@@ -36,7 +36,7 @@ int getTileW(int W, int outW){
   int w = OUT_TILE_SIZE_W;
   while(W>=w){
     tileW++;
-    w+= OUT_TILE_SIZE_H;
+    w+= OUT_TILE_SIZE_W;
   }
   return tileW;
 }
@@ -309,13 +309,14 @@ void conv_kernel(uint32_t sizeOutTileH,
     }
   }
 
+  uint32_t outDummyH = 0;
+  uint32_t inDummyH = 0;
+  uint32_t outDummyW = 0;
+  uint32_t inDummyW = 0;
   for (uint32_t filterIdx = 0; filterIdx < KN / nFilterinLoop / nVirtualThread / 16; filterIdx++) {
     // for (uint32_t threadIdx = 0; threadIdx < nVirtualThread; threadIdx++) {
 
-    uint32_t outDummyH = 0;
-    uint32_t inDummyH = 0;
-    uint32_t outDummyW = 0;
-    uint32_t inDummyW = 0;
+
 
     if (resizedOutTileH < MIN_H_SIZE) {
       outDummyH = MIN_H_SIZE - resizedOutTileH;
@@ -610,13 +611,15 @@ void conv_kernel(uint32_t sizeOutTileH,
               sizeOutTileW, sizeOutTileH, out_w);
         }
       } else {
-        for (int hIdx = 0; hIdx < sizeOutTileH * nFilterinLoop; hIdx++) {
-          VTAStoreBuffer2D(vtaCmdH, outputSramBaseAddr + hIdx * resizedOutTileW,
-                           4, vta_output_buf,
-                           (filterIdx * nVirtualThread + threadIdx) *
-                           nFilterinLoop * out_w * out_h +
-                           (outputHOffset + hIdx) * out_w + outputWOffset,
-                           sizeOutTileW, 1, out_w);
+        for (int fIdx = 0; fIdx < nFilterinLoop; fIdx++) {
+          for (int hIdx = 0; hIdx < sizeOutTileH; hIdx++) {
+            VTAStoreBuffer2D(vtaCmdH, outputSramBaseAddr + (hIdx+fIdx*sizeOutTileH) * resizedOutTileW + fIdx * outDummyH * resizedOutTileH,
+                             4, vta_output_buf,
+                             ((filterIdx+fIdx) * nVirtualThread + threadIdx) *
+                                 out_w * out_h +
+                                 (outputHOffset + hIdx) * out_w + outputWOffset,
+                             sizeOutTileW, 1, out_w);
+          }
         }
       }
       VTADepPush(vtaCmdH, 3, 2);
@@ -647,9 +650,9 @@ int conv21_test() {
   int KW = 3;
   int pad_size = 1;
   int stride_size = 1;
-  bool doRelu = true;
+  bool doRelu = false;
   uint8_t shift = 6;
-  bool doBias = false;
+  bool doBias = true;
 
   // input NCHW
   int8_t in_NCHW[N][C][H][W];
@@ -659,7 +662,6 @@ int conv21_test() {
       for (int h = 0; h < H; h++) {
         for (int w = 0; w < W; w++) {
           in_NCHW[n][c][h][w] = (int8_t) (rand() % 5);
-          //in_NCHW[n][c][h][w] = 2;
         }
       }
     }
@@ -719,10 +721,8 @@ int conv21_test() {
     for (int j = 0; j < KH; j++) {
       for (int k = 0; k < KW; k++) {
         for (int l = 0; l < C; l++) {
-          //filter_NHWC[i][j][k][l] = (int8_t) (rand() % 20);
-          //if (rand() % 2 == 0) filter_NHWC[i][j][k][l] = filter_NHWC[i][j][k][l] * -1;
-          filter_NHWC[i][j][k][l] = 2;
-          if(i>31) filter_NHWC[i][j][k][l] = 0;
+          filter_NHWC[i][j][k][l] = (int8_t) (rand() % 20);
+          if (rand() % 2 == 0) filter_NHWC[i][j][k][l] = filter_NHWC[i][j][k][l] * -1;
         }
       }
     }
@@ -1008,9 +1008,17 @@ int conv21_test() {
           {
             if ((int8_t) v != result[b][i][j][f])
             {
-              printf("TILE : (%d, %d), CHW : %u|%u|%u  (%d, %d)\n", getTileH(i,out_h), getTileW(j,out_w), f, i, j, (int8_t) v, result[b][i][j][f]);
-              is_diff = -1;
-              //return -1;
+              {
+                printf("TILE : (%d, %d), CHW : %u|%u|%u  (%d, %d)\n",
+                       getTileH(i, out_h),
+                       getTileW(j, out_w),
+                       f,
+                       i,
+                       j,
+                       (int8_t) v,
+                       result[b][i][j][f]);
+                is_diff = -1;
+              }
             }
           }
         }
