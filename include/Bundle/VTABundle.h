@@ -8,6 +8,7 @@
 
 void xlnk_reset();
 
+int elemsign(int8_t* input, int8_t *output, unsigned_t size);
 int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
                 int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, int tile_h=14, int tile_w=14, uint32_t idEVTA = 0);
 
@@ -21,6 +22,9 @@ int convolution_wo_tr_wo_ch(int8_t* input, int8_t *kernel, int32_t *bias, int8_t
 int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C,
         dim_t KN, dim_t KH, dim_t KW, int pad_size, int stride_size, size_t group, size_t dilation,
         bool doRelu, bool doBias, int out_h, int out_w);
+
+int bnn_nonvtaconvolution(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
+                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w);
 
 int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                       int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
@@ -40,6 +44,10 @@ int fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t 
                    int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset,
                    dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias);
 
+int bnn_fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
+                   int32_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset,
+                   dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias);
+
 int maxpool(int8_t* input, int8_t *output, uint64_t N, uint64_t H, uint64_t W, uint64_t C, uint32_t KH, uint32_t KW, uint32_t pad_size,
             uint32_t stride_size);
 
@@ -53,6 +61,8 @@ int relu(int8_t* input, int8_t *output, unsigned_t size, float inputScale=1.0, f
 int quantize(int8_t *input, int8_t *output, uint64_t size, float scale, int32_t offset);
 
 int dequantize(int8_t *input, int8_t *output, uint64_t size, float scale, int32_t offset);
+
+int typecast(int8_t *input, int8_t *output, uint64_t size, float scale, int32_t offset);
 
 int transpose(int8_t *input, int8_t *output, dim_t inDim0, dim_t inDim1, dim_t inDim2, dim_t inDim3,
               dim_t outDim0, dim_t outDim1, dim_t outDim2, dim_t outDim3,
@@ -101,4 +111,6 @@ void transpose_nhwc2vtak(int8_t* input, int8_t* output, int KN, int KH, int KW, 
 void transpose_vtaio2nhwc(int8_t* input, int8_t* output, int N, int H, int W, int C);
 
 void transpose_vtak2nhwc(int8_t* input, int8_t* output, int KN, int KH, int KW, int C);
+
+void transpose_nhwc2vtaio_pack(int8_t* input, int8_t* output, int N, int H, int W, int C);
 #endif //VTALIB_EXAMPLE_VTABUNDLE_H

@@ -20,7 +20,12 @@ if(NOT NESTC_EVTA_RUN_ON_ZCU102)
     message(STATUS "VTALIB with Simulator")
     add_definitions(-DNESTC_USE_VTASIM=1)
     INCLUDE_DIRECTORIES(include include/simulator include/simulator/vta)
-    add_library(vta_runtime lib/simulator/runtime.cc lib/simulator/sim_driver.cc lib/simulator/virtual_memory.cc lib/simulator/sim_tlpp.cc)
+    #add_library(vta_runtime lib/simulator/runtime.cc lib/simulator/sim_driver.cc lib/simulator/virtual_memory.cc lib/simulator/sim_tlpp.cc)
+    if(NOT NESTC_BNN)
+        add_library(vta_runtime lib/simulator/runtime.cc lib/simulator/sim_driver.cc lib/simulator/virtual_memory.cc lib/simulator/sim_tlpp.cc)
+    else()
+        add_library(vta_runtime lib/simulator/runtime.cc lib/simulator/sim_driver_bnn.cc lib/simulator/virtual_memory.cc lib/simulator/sim_tlpp.cc)
+    endif()
     add_subdirectory(tests/simtests)
 else()
     message(STATUS "VTALIB with ZCU102")
@@ -73,9 +78,15 @@ else()
             -DVTA_LOG_WGT_BUFF_SIZE=18
             -DVTA_LOG_ACC_BUFF_SIZE=17)
     else()
-        add_definitions(-DVTA_LOG_INP_BUFF_SIZE=16
-                -DVTA_LOG_WGT_BUFF_SIZE=19
-                -DVTA_LOG_ACC_BUFF_SIZE=18)
+        if(NOT NESTC_BNN)
+            add_definitions(-DVTA_LOG_INP_BUFF_SIZE=16
+                    -DVTA_LOG_WGT_BUFF_SIZE=19
+                    -DVTA_LOG_ACC_BUFF_SIZE=18)
+        else()
+            add_definitions(-DVTA_LOG_INP_BUFF_SIZE=15
+                -DVTA_LOG_WGT_BUFF_SIZE=18
+                -DVTA_LOG_ACC_BUFF_SIZE=17)
+        endif()
     endif()
 
     if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")

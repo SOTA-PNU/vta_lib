@@ -11,7 +11,9 @@ foreach(object ${testfiles})
     add_definitions(-DGLOW_WITH_ZCU102_TEST=1)
 
     if(NESTC_WITH_EVTA)
-        add_nestc_test(ZCU102 NAME ${obj}  ${CMAKE_CURRENT_BINARY_DIR}/passed_tests/${obj})
+	if(NOT NESTC_BNN)
+            add_nestc_test(ZCU102 NAME ${obj}  ${CMAKE_CURRENT_BINARY_DIR}/passed_tests/${obj})
+        endif()
     endif()
 endforeach()
 
