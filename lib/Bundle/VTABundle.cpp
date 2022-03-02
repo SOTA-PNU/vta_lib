@@ -33,8 +33,8 @@ using namespace std;
 #define OUT_TILE_SIZE_W 14
 #define OUT_TILE_SIZE_H 14
 
-//#define PROFILE_AUTOTUNE
-#ifdef PROFILE_AUTOTUNE
+//#define NESTC_EVTA_PROFILE_AUTOTUNE
+#ifdef NESTC_EVTA_PROFILE_AUTOTUNE
 uint32_t f0 = 0;
 uint32_t f1 = 0;
 uint32_t f2 = 0;
@@ -341,7 +341,7 @@ void conv_kernel(uint32_t sizeOutTileH,
   for(;nFilterinLoop>0;nFilterinLoop--){
     if((KN/16) % (nFilterinLoop*nVirtualThread) ==0) break;
   }
-#ifdef PROFILE_AUTOTUNE
+#ifdef NESTC_EVTA_PROFILE_AUTOTUNE
   f7 = nFilterinLoop;
   f8 = KN / nFilterinLoop / nVirtualThread / 16;
 #endif
@@ -366,7 +366,7 @@ void conv_kernel(uint32_t sizeOutTileH,
       resizedInTileW = (resizedOutTileW - 1) * stride_size + KW;
       inDummyW = resizedInTileW - sizeInTileW;
     }
-#ifdef PROFILE_AUTOTUNE
+#ifdef NESTC_EVTA_PROFILE_AUTOTUNE
     if(b0==0){
       f9 = outDummyH;
       f11 = resizedOutTileH;
@@ -446,7 +446,7 @@ void conv_kernel(uint32_t sizeOutTileH,
             threadIdx * (WGT_MEM_ENTRY / nVirtualThread);
         VTADepPop(vtaCmdH, 2, 1);
         if(threadIdx==0) {
-#ifdef PROFILE_AUTOTUNE
+#ifdef NESTC_EVTA_PROFILE_AUTOTUNE
           f15 ++;
 #endif
           VTALoadBuffer2D(vtaCmdH, vta_input_buf, src_offset, x_size, y_size,
@@ -504,7 +504,7 @@ void conv_kernel(uint32_t sizeOutTileH,
           VTAPushGEMMOp(vtaCmdH, uopHandle_gemm, &gemmop_mxn, &gemm_ctx, 0);
         else
           VTAPushGEMMOp(vtaCmdH, uopHandle_gemm, &gemmop_1x1, &gemm_ctx, 0);
-#ifdef PROFILE_AUTOTUNE
+#ifdef NESTC_EVTA_PROFILE_AUTOTUNE
         f16 ++;
 #endif
 
@@ -664,7 +664,7 @@ void conv_kernel(uint32_t sizeOutTileH,
 
       if (outDummyW == 0) {
         for (uint32_t fIdx = 0; fIdx < nFilterinLoop; fIdx++) {
-#ifdef PROFILE_AUTOTUNE
+#ifdef NESTC_EVTA_PROFILE_AUTOTUNE
           f17 ++;
 #endif
           VTAStoreBuffer2D(
@@ -678,7 +678,7 @@ void conv_kernel(uint32_t sizeOutTileH,
         }
       } else {
         for (int hIdx = 0; hIdx < sizeOutTileH * nFilterinLoop; hIdx++) {
-#ifdef PROFILE_AUTOTUNE
+#ifdef NESTC_EVTA_PROFILE_AUTOTUNE
           f17 ++;
 #endif
           VTAStoreBuffer2D(vtaCmdH, outputSramBaseAddr + hIdx * resizedOutTileW,
@@ -1377,7 +1377,7 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
   nTileW = out_w / sizeOutTileW + isRemainTileW;
   nTileH = out_h / sizeOutTileH + isRemainTileH;
 
-#ifdef PROFILE_AUTOTUNE
+#ifdef NESTC_EVTA_PROFILE_AUTOTUNE
   f0 = sizeOutTileW;
   f1 = sizeOutTileH;
   f2 = sizeInTileW;
@@ -1423,7 +1423,7 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
       }
 
       if ((tileWIdx != nTileW - 1)) {
-#ifdef PROFILE_AUTOTUNE
+#ifdef NESTC_EVTA_PROFILE_AUTOTUNE
         b0 = 0;
 #endif
         conv_kernel(resizedOutTileH, sizeOutTileW, pad_size, stride_size,
@@ -1434,7 +1434,7 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
                     vtaCmdH, idEVTA, nVirtualThread);
       } else {
         uint32_t sizeOutTileBoundaryW = out_w - tileWIdx * sizeOutTileW;
-#ifdef PROFILE_AUTOTUNE
+#ifdef NESTC_EVTA_PROFILE_AUTOTUNE
         b0 = 1;
         f6 = sizeOutTileBoundaryW;
 #endif
@@ -1540,25 +1540,8 @@ int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *outp
 #endif
 
 
-#ifdef PROFILE_AUTOTUNE
-  std::cout<<f0<<std::endl;
-  std::cout<<f1<<std::endl;
-  std::cout<<f2<<std::endl;
-  std::cout<<f3<<std::endl;
-  std::cout<<f4<<std::endl;
-  std::cout<<f5<<std::endl;
-  std::cout<<f6<<std::endl;
-  std::cout<<f7<<std::endl;
-  std::cout<<f8<<std::endl;
-  std::cout<<f9<<std::endl;
-  std::cout<<f10<<std::endl;
-  std::cout<<f11<<std::endl;
-  std::cout<<f12<<std::endl;
-  std::cout<<f13<<std::endl;
-  std::cout<<f14<<std::endl;
-  std::cout<<f15<<std::endl;
-  std::cout<<f16<<std::endl;
-  std::cout<<f17<<std::endl;
+#ifdef NESTC_EVTA_PROFILE_AUTOTUNE
+    std::cout<<f0<<","<<f1<<","<<f2<<","<<f3<<","<<f4<<","<<f5<<","<<f6<<","<<f7<<","<<f8<<","<<f9<<","<<f10<<","<<f11<<","<<f12<<","<<f13<<","<<f14<<","<<f15<<","<<f16<<","<<f17<<endl;
 #endif
   return 0;
 }
