@@ -1,15 +1,15 @@
 cmake_minimum_required(VERSION 3.10)
 project(vtalib)
 
-option(NESTC_EVTA_RUN_WITH_GENERIC_BUNDLE "Use Generic library for EVTA" ON)
-option(NESTC_EVTA_RUN_ON_ZCU102 "Run on ZCU102 board" OFF)
+option(NESTC_EVTA_RUN_WITH_GENERIC_BUNDLE "Use Generic library for EVTA" OFF)
+option(NESTC_EVTA_RUN_ON_ZCU102 "Run on ZCU102 board" ON)
 option(NESTC_EVTA_LIB_VALIDATION "Validate EVTA library while running" OFF)
 option(NESTC_EVTA_DEBUG "Debug mode for EVTA library" OFF)
 option(NESTC_EVTA_PROFILE "Profile mode for EVTA HW" OFF)
 INCLUDE_DIRECTORIES(include 3rdparty/dlpack/include)
 INCLUDE_DIRECTORIES(include 3rdparty/dmlc-core/include)
-option(VTALIB_WITHOUT_NESTC "use VTALIB_ONLY running without nest-c" OFF)
-option(NESTC_EVTA_MULTI "use Multi-EVTA" OFF)
+option(VTALIB_WITHOUT_NESTC "use VTALIB_ONLY running without nest-c" ON)
+option(NESTC_EVTA_MULTI "use Multi-EVTA" ON)
 
 #use VTALIB_ONLY running without nest-c
 if(VTALIB_WITHOUT_NESTC)
@@ -130,6 +130,7 @@ endif()
 
 if(NESTC_EVTA_DEBUG)
     add_definitions(-DVTA_DEBUG_MODE)
+    message("debug?")
 endif()
 if(NESTC_EVTA_LIB_VALIDATION)
     add_definitions(-DVTA_VALIDATION)

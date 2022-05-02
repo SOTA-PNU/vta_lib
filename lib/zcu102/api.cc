@@ -198,9 +198,10 @@ int VTADepPop(VTACommandHandle cmd, int from_qid, int to_qid) {
   return 0;
 }
 
-void VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles) {
-  static_cast<vta::CommandQueue*>(cmd)->
-      Synchronize(wait_cycles);
+int VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles,
+                 char* rec_cache, int buf_size, int num_cache, int record) {
+  return static_cast<vta::CommandQueue*>(cmd)->
+      Synchronize(wait_cycles, rec_cache, buf_size, num_cache, record);
 }
 
 void VTAUopBufferReset(VTACommandHandle cmdH) {

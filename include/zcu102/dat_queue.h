@@ -560,6 +560,9 @@ class InsnQueue : public BaseQueue<VTAGenericInsn> {
   void AutoReadBarrier() {
     ReadBarrier();
   }
+  void* dram_point(){
+    return dram_buffer_.data();
+  }                  
   /*! \brief Writer barrier to make sure that data written by CPU is visible to VTA. */
   void ReadBarrier() {
     CHECK(fpga_buff_ != nullptr);
@@ -579,7 +582,23 @@ class InsnQueue : public BaseQueue<VTAGenericInsn> {
                     buff_size);
     }
   }
-
+  void ManualReadBarrier(uint32_t buff_size) {
+    CHECK(fpga_buff_ != nullptr);
+    CHECK(fpga_buff_phy_);
+    CHECK(buff_size <= kMaxBytes);
+    // printf("InstQ ReadBarrier\n");
+    // Copy contents of DRAM buffer to FPGA buff
+    VTAMemCopyFromHost(fpga_buff_,
+                       dram_buffer_.data(),
+                       buff_size);
+    // Flush if we're using a shared memory system
+    // and if interface is non-coherent
+    if (!coherent_ && always_cache_) {
+      VTAFlushCache(fpga_buff_,
+                    fpga_buff_phy_,
+                    buff_size);
+    }
+  }                      
  protected:
   /*! \return Add new instruction to the buffer. */
   VTAGenericInsn* NextInsn() {

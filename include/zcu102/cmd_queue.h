@@ -146,28 +146,40 @@ class CommandQueue {
     }
   }
 
-  void Synchronize(uint32_t wait_cycles) {
+  int Synchronize(uint32_t wait_cycles, char* rec_cache = NULL, int buf_size = 0, int num_cache = 0, int record = -1) {
     //printf("sync\n");    
     // Insert dependences to force serialization
-    if (debug_flag_ & VTA_DEBUG_FORCE_SERIAL) {
-      insn_queue_.RewriteForceSerial();
-    } else {
-      // This will issue finish after last store finishes
-      insn_queue_.DepPush(kStoreStage, kComputeStage);
-      insn_queue_.DepPush(kLoadStage, kComputeStage);
-      insn_queue_.DepPop(kStoreStage, kComputeStage);
-      insn_queue_.DepPop(kLoadStage, kComputeStage);
-      insn_queue_.CommitPendingPop(kComputeStage);
+    int counter = 0;
+    if(record != 0){                
+      if (debug_flag_ & VTA_DEBUG_FORCE_SERIAL) {
+        insn_queue_.RewriteForceSerial();
+      } else {
+        // This will issue finish after last store finishes
+        insn_queue_.DepPush(kStoreStage, kComputeStage);
+        insn_queue_.DepPush(kLoadStage, kComputeStage);
+        insn_queue_.DepPop(kStoreStage, kComputeStage);
+        insn_queue_.DepPop(kLoadStage, kComputeStage);
+        insn_queue_.CommitPendingPop(kComputeStage);
+      }
+      // NOTE: FINISH cannot contain pop
+      VTAGemInsn* insn = insn_queue_.CreateGemInsn();
+      insn->opcode = VTA_OPCODE_FINISH;
+      CHECK(!insn_queue_.PendingPop());
     }
-    // NOTE: FINISH cannot contain pop
-    VTAGemInsn* insn = insn_queue_.CreateGemInsn();
-    insn->opcode = VTA_OPCODE_FINISH;
-    CHECK(!insn_queue_.PendingPop());
     // Check if there are no instruction to execute at all
-    if (insn_queue_.count() == 0) return;
+    if (insn_queue_.count() == 0 && record != 0) return 0;
+    if(record == 0){
+      memcpy(insn_queue_.dram_point(), rec_cache, buf_size);
+    }else if(record == 1){
+      memcpy(rec_cache, insn_queue_.dram_point(), insn_queue_.count() * sizeof(VTAGenericInsn));
+    }
     // Synchronization for the queues
     uop_queue_.AutoReadBarrier();
-    insn_queue_.AutoReadBarrier();
+    if(record == 0){
+      insn_queue_.ManualReadBarrier(buf_size);
+    }else{                                                                
+      insn_queue_.AutoReadBarrier();
+    }
     // Dump instructions if debug enabled
 
     if (debug_flag_ & VTA_DEBUG_DUMP_INSN) {
@@ -176,21 +188,34 @@ class CommandQueue {
 
     //printf("[Synchronize] check last instruction FINISH");
     // Make sure that the last instruction is a finish instruction
-    CHECK(reinterpret_cast<VTAMemInsn*>(
-        insn_queue_.data())[insn_queue_.count()-1].opcode == VTA_OPCODE_FINISH);
+    if(record != 0){                                                             
+      CHECK(reinterpret_cast<VTAMemInsn*>(
+      insn_queue_.data())[insn_queue_.count()-1].opcode == VTA_OPCODE_FINISH);
+    }                                                                              
     //printf(" -- DONE\n");
 
     //printf("[Synchronize] check exceed physical memory limit");
     // Make sure that we don't exceed contiguous physical memory limits
-    CHECK(insn_queue_.count() * sizeof(VTAGenericInsn) < VTA_MAX_XFER);
+    if(record != 0){                                                                   
+      CHECK(insn_queue_.count() * sizeof(VTAGenericInsn) < VTA_MAX_XFER);
+    }
     //printf(" -- DONE\n");
 
     //printf("[Synchronize] device run. device=%p", device_);
-    int timeout = VTADeviceRun(
+    int timeout;
+    if(record == 0){                                                         
+        timeout = VTADeviceRun(
+        device_,
+        insn_queue_.dram_phy_addr(),
+        buf_size/sizeof(VTAGenericInsn),
+        wait_cycles);
+    }else{                              
+        timeout = VTADeviceRun(
         device_,
         insn_queue_.dram_phy_addr(),
         insn_queue_.count(),
         wait_cycles);
+    }
     //printf("[Synchronize] device run. -- DONE\n");
 
     //printf("[Synchronize] check timeout");
@@ -205,6 +230,7 @@ class CommandQueue {
     //printf("[Synchronize] reset uop queue");
     insn_queue_.Reset();
     //printf(" -- DONE\n");    
+    return counter;                           
   }
 
   // Get record kernel
@@ -420,7 +446,7 @@ class CommandQueue {
   }
 
   // Internal debug flag
-  int debug_flag_{ VTA_DEBUG_DUMP_INSN }; // org = 0
+  int debug_flag_{ 0};//VTA_DEBUG_DUMP_INSN }; // org = 0
   // The kernel we are currently recording
   UopKernel* record_kernel_{nullptr};
   // Micro op queue
