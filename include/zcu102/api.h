@@ -89,6 +89,7 @@ int VTAPushALUOp(VTACommandHandle cmdH,
 int VTADepPush(VTACommandHandle cmd, int from_qid, int to_qid) ;
 
 int VTADepPop(VTACommandHandle cmd, int from_qid, int to_qid) ;
-int VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles, 
+void VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles);
+int VTASynchronize_CNU(VTACommandHandle cmd, uint32_t wait_cycles, 
                  char* rec_cache, int buf_size, int num_cache, int record);
 void VTAUopBufferReset(VTACommandHandle cmdH);

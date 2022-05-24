@@ -146,7 +146,68 @@ class CommandQueue {
     }
   }
 
-  int Synchronize(uint32_t wait_cycles, char* rec_cache = NULL, int buf_size = 0, int num_cache = 0, int record = -1) {
+  void Synchronize(uint32_t wait_cycles) {
+    //printf("sync\n");    
+    // Insert dependences to force serialization         
+    if (debug_flag_ & VTA_DEBUG_FORCE_SERIAL) {
+      insn_queue_.RewriteForceSerial();
+    } else {
+      // This will issue finish after last store finishes
+      insn_queue_.DepPush(kStoreStage, kComputeStage);
+      insn_queue_.DepPush(kLoadStage, kComputeStage);
+      insn_queue_.DepPop(kStoreStage, kComputeStage);
+      insn_queue_.DepPop(kLoadStage, kComputeStage);
+      insn_queue_.CommitPendingPop(kComputeStage);
+    }
+    // NOTE: FINISH cannot contain pop
+    VTAGemInsn* insn = insn_queue_.CreateGemInsn();
+    insn->opcode = VTA_OPCODE_FINISH;
+    CHECK(!insn_queue_.PendingPop());
+    // Check if there are no instruction to execute at all
+    if (insn_queue_.count() == 0) return;
+    // Synchronization for the queues
+    uop_queue_.AutoReadBarrier();
+    insn_queue_.AutoReadBarrier();
+    // Dump instructions if debug enabled
+
+    if (debug_flag_ & VTA_DEBUG_DUMP_INSN) {
+      insn_queue_.DumpInsn();
+    }
+
+    //printf("[Synchronize] check last instruction FINISH");
+    // Make sure that the last instruction is a finish instruction
+    CHECK(reinterpret_cast<VTAMemInsn*>(
+    insn_queue_.data())[insn_queue_.count()-1].opcode == VTA_OPCODE_FINISH);
+    //printf(" -- DONE\n");
+
+    //printf("[Synchronize] check exceed physical memory limit");
+    // Make sure that we don't exceed contiguous physical memory limits
+    CHECK(insn_queue_.count() * sizeof(VTAGenericInsn) < VTA_MAX_XFER);
+    //printf(" -- DONE\n");
+
+    //printf("[Synchronize] device run. device=%p", device_);
+    int timeout = VTADeviceRun(
+        device_,
+        insn_queue_.dram_phy_addr(),
+        insn_queue_.count(),
+        wait_cycles);
+    //printf("[Synchronize] device run. -- DONE\n");
+
+    //printf("[Synchronize] check timeout");
+    CHECK_EQ(timeout, 0);
+    //printf(" -- DONE\n");
+    
+    //printf("[Synchronize] reset uop queue");
+    // Reset buffers
+    uop_queue_.Reset();
+    //printf(" -- DONE\n");
+
+    //printf("[Synchronize] reset uop queue");
+    insn_queue_.Reset();
+    //printf(" -- DONE\n");    
+  }
+
+  int Synchronize_CNU(uint32_t wait_cycles, char* rec_cache = NULL, int buf_size = 0, int num_cache = 0, int record = -1) {
     //printf("sync\n");    
     // Insert dependences to force serialization
     int counter = 0;
@@ -183,7 +244,7 @@ class CommandQueue {
     // Dump instructions if debug enabled
 
     if (debug_flag_ & VTA_DEBUG_DUMP_INSN) {
-      insn_queue_.DumpInsn();
+        insn_queue_.DumpInsn();      
     }
 
     //printf("[Synchronize] check last instruction FINISH");
@@ -201,6 +262,7 @@ class CommandQueue {
     }
     //printf(" -- DONE\n");
 
+    counter = insn_queue_.count() * sizeof(VTAGenericInsn);
     //printf("[Synchronize] device run. device=%p", device_);
     int timeout;
     if(record == 0){                                                         
