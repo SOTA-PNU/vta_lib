@@ -57,7 +57,8 @@ void VTAStoreBuffer2D(VTACommandHandle cmd,
                       uint32_t y_size,
                       uint32_t x_stride) ;
 
-void VTAUopPush(uint32_t mode,
+void VTAUopPush(VTACommandHandle cmd,
+		uint32_t mode,
                 uint32_t reset_out,
                 uint32_t dst_index,
                 uint32_t src_index,
@@ -90,4 +91,6 @@ int VTADepPush(VTACommandHandle cmd, int from_qid, int to_qid) ;
 
 int VTADepPop(VTACommandHandle cmd, int from_qid, int to_qid) ;
 void VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles);
+int VTASynchronize_CNU(VTACommandHandle cmd, uint32_t wait_cycles, 
+                 char* rec_cache, int buf_size, int num_cache, int record);
 void VTAUopBufferReset(VTACommandHandle cmdH);

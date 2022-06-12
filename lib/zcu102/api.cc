@@ -203,6 +203,12 @@ void VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles) {
       Synchronize(wait_cycles);
 }
 
+int VTASynchronize_CNU(VTACommandHandle cmd, uint32_t wait_cycles,
+                 char* rec_cache, int buf_size, int num_cache, int record) {
+  return static_cast<vta::CommandQueue*>(cmd)->
+      Synchronize_CNU(wait_cycles, rec_cache, buf_size, num_cache, record);
+}
+
 void VTAUopBufferReset(VTACommandHandle cmdH) {
   static_cast<vta::CommandQueue*>(cmdH)->ResetUopQueue();
 }

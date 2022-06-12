@@ -294,7 +294,25 @@ TVM_DLL int VTADepPop(VTACommandHandle cmd, int from_qid, int to_qid);
  *
  */
 TVM_DLL void VTASynchronize(VTACommandHandle cmd, uint32_t wait_cycles);
+
+/*!
+ * \brief Synchronize the command handle.
+ *  Commit all the instructions to VTA and wait until
+ *  the accelerator finishes its job.
+ *  Perform all of the out-of-order DRAM stores.
+ * \param cmd The VTA command handle.
+ * \param wait_cycles The limit of poll cycles.
+ * \param rec_cache 
+ * \param buf_size
+ * \param num_cache
+ * \param record
+ *
+ */
+TVM_DLL int VTASynchronize_CNU(VTACommandHandle cmd, uint32_t wait_cycles, 
+                            char* rec_cache=NULL, int buf_size=0, int num_cache=0, int record=-1);
+
 void VTAUopBufferReset(VTACommandHandle cmdH);
+
 #ifdef __cplusplus
 }
 #endif
