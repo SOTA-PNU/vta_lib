@@ -79,7 +79,7 @@ int main()
   VTASetDebugMode(vtaCmdH, 0);
 
 
-  for(int lcnt = 0; lcnt < 1000; lcnt++) {
+  for(int lcnt = 0; lcnt < 512; lcnt++) {
     cout<<"LOOP TEST COUNT: "<<lcnt<<endl;
     for (int i = 0; i < 16; i++) {
       input[i] = rand() % 20 - 10;
