@@ -15,6 +15,14 @@ int convolution(int8_t* input, int8_t *kernel, int8_t *output, int N, int H, int
 int convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
                        int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, void* vtaCmdH, int nVirtualThread = 1, int tileHSize = 14, int tileWSize = 14, uint32_t idEVTA = 0);
 
+int xp_convolution_wo_tr(int8_t* input, int8_t *kernel, int32_t *bias, int32_t *scalingfactor, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size, int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, void* vtaCmdH, int nVirtualThread = 1, int tileHSize = 14, int tileWSize = 14, uint32_t idEVTA = 0, bool mul = false);
+
+int xp_convolution_wo_tr_scale(int8_t* input, int8_t *kernel, int32_t *bias, int32_t *scalingfactor, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size, int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, void* vtaCmdH, int nVirtualThread, int tileHSize, int tileWSize, uint32_t idEVTA, bool domul = true);
+
+int convolution_wo_tr_scale(int8_t* input, int8_t *kernel, int32_t *bias, int32_t *scalingfactor, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
+                      int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, void* vtaCmdH, int nVirtualThread, int tileHSize, int tileWSize, uint32_t idEVTA);
+
+
 int convolution_wo_tr_wo_ch(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *output, int N, int H, int W, int C, int KN, int KH, int KW, int pad_size,
                             int stride_size, bool doRelu, bool doBias, uint8_t shift, int out_h, int out_w, uint32_t idEVTA = 0);
 
@@ -23,8 +31,9 @@ int convolutionFloat(int8_t* input, int8_t *kernel, int8_t *bias, int8_t *output
         dim_t KN, dim_t KH, dim_t KW, int pad_size, int stride_size, size_t group, size_t dilation,
         bool doRelu, bool doBias, int out_h, int out_w);
 
-int bnn_nonvtaconvolution(int8_t* input, int8_t *kernel, int32_t *bias, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
-                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w);
+int bnn_nonvtaconvolution_scale(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset, 
+				int8_t *bias, float biasScale, int32_t biasOffset, int8_t* scalefactor, int8_t *output, int32_t outputShift, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, 
+				dim_t KN, dim_t KH, dim_t KW, int pad_size, int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w);
 
 int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                       int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
@@ -42,10 +51,6 @@ int cpuvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
 
 int fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                    int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset,
-                   dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias);
-
-int bnn_fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
-                   int32_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset,
                    dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias);
 
 int maxpool(int8_t* input, int8_t *output, uint64_t N, uint64_t H, uint64_t W, uint64_t C, uint32_t KH, uint32_t KW, uint32_t pad_size,
@@ -81,6 +86,8 @@ int elemadd(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *inp
 int elemadd_relu(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size);
 
+int elemadd_scale(int8_t *input0, int8_t *input1, int8_t *output, float destScale, int32_t size);
+
 int elemsub(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *input1, float input1Scale, int32_t input1Offset,
             int8_t *output, float destScale, int32_t destOffset, unsigned_t size);
 
@@ -113,4 +120,6 @@ void transpose_vtaio2nhwc(int8_t* input, int8_t* output, int N, int H, int W, in
 void transpose_vtak2nhwc(int8_t* input, int8_t* output, int KN, int KH, int KW, int C);
 
 void transpose_nhwc2vtaio_pack(int8_t* input, int8_t* output, int N, int H, int W, int C);
+
+void transpose_nhwc2vtaio_pack_zerofill(int8_t* input, int8_t* output, int N, int H, int W, int C);
 #endif //VTALIB_EXAMPLE_VTABUNDLE_H

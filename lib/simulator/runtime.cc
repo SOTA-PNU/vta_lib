@@ -804,6 +804,29 @@ class InsnQueue : public BaseQueue<VTAGenericInsn> {
                static_cast<int>(c.gemm.wgt_factor_in),
                static_cast<int>(c.gemm.src_factor_in),
                static_cast<int>(c.gemm.dst_factor_in));
+      } else if (c.mem.opcode == VTA_OPCODE_XP_GEMM) {
+        // Print instruction field information
+        printf("XP GEMM\n");
+
+        printf("\tdep - pop prev: %d, pop next: %d, push prev: %d, push next: %d\n",
+               static_cast<int>(c.mem.pop_prev_dep),
+               static_cast<int>(c.mem.pop_next_dep),
+               static_cast<int>(c.mem.push_prev_dep),
+               static_cast<int>(c.mem.push_next_dep));
+        printf("\treset_out: %d\n", static_cast<int>(c.gemm.reset_reg));
+        printf("\trange (%d, %d)\n",
+               static_cast<int>(c.gemm.uop_bgn),
+               static_cast<int>(c.gemm.uop_end));
+        printf("\touter loop - iter: %d, wgt: %d, inp: %d, acc: %d\n",
+               static_cast<int>(c.gemm.iter_out),
+               static_cast<int>(c.gemm.wgt_factor_out),
+               static_cast<int>(c.gemm.src_factor_out),
+               static_cast<int>(c.gemm.dst_factor_out));
+        printf("\tinner loop - iter: %d, wgt: %d, inp: %d, acc: %d\n",
+               static_cast<int>(c.gemm.iter_in),
+               static_cast<int>(c.gemm.wgt_factor_in),
+               static_cast<int>(c.gemm.src_factor_in),
+               static_cast<int>(c.gemm.dst_factor_in));
       } else if (c.mem.opcode == VTA_OPCODE_ALU) {
         // Print instruction field information
         printf("ALU - %s\n", getOpcodeString(c.alu.alu_opcode, c.alu.use_imm));
@@ -849,6 +872,7 @@ class InsnQueue : public BaseQueue<VTAGenericInsn> {
             if (c.mem.push_next_dep) g2s_queue++;
         }
       } else if (c.mem.opcode == VTA_OPCODE_GEMM ||
+                c.mem.opcode == VTA_OPCODE_XP_GEMM ||
                  c.mem.opcode == VTA_OPCODE_ALU) {
         // Print instruction field information
         if (c.gemm.pop_prev_dep) l2g_queue--;
@@ -936,6 +960,7 @@ class InsnQueue : public BaseQueue<VTAGenericInsn> {
   // Get stage of the computation
   static PipelineStage GetPipelineStage(VTAMemInsn* insn) {
     if (insn->opcode == VTA_OPCODE_GEMM) return kComputeStage;
+    if (insn->opcode == VTA_OPCODE_XP_GEMM) return kComputeStage;
     if (insn->opcode == VTA_OPCODE_ALU) return kComputeStage;
     if (insn->opcode == VTA_OPCODE_LOAD) {
       if (insn->x_size == 0) return kNoneStage;
@@ -1190,6 +1215,28 @@ class CommandQueue {
     this->CheckInsnOverFlow();
   }
 
+  void PushXPGEMMOp(void** uop_handle,
+                  int (*finit)(void*,VTACommandHandle cmd),
+                  void* signature,
+                  int nbytes) {
+    UopKernelMap** uptr = reinterpret_cast<UopKernelMap**>(uop_handle);
+    if (uptr[0] == nullptr) {
+      uptr[0] = new UopKernelMap();
+    }
+    UopKernel** kptr = uptr[0]->Get(signature, nbytes);
+    if (kptr[0] == nullptr) {
+      record_kernel_ = new UopKernel(static_cast<char*>(signature), nbytes);
+      CHECK_EQ((*finit)(signature,this), 0);
+      kptr[0] = static_cast<UopKernel*>(record_kernel_);
+      if (debug_flag_ & VTA_DEBUG_DUMP_UOP) {
+        record_kernel_->Dump();
+      }
+      record_kernel_ = nullptr;
+    }
+    this->PushXPGEMMOp(static_cast<UopKernel*>(kptr[0]));
+    this->CheckInsnOverFlow();
+  }
+
   void PushALUUop(void** uop_handle,
                   int (*finit)(void*,VTACommandHandle cmd),
                   void* signature,
@@ -1262,6 +1309,44 @@ class CommandQueue {
     }
     VTAGemInsn* insn = insn_queue_.CreateGemInsn();
     insn->opcode = VTA_OPCODE_GEMM;
+    insn->reset_reg = kernel->reset_out_;
+    insn->uop_bgn = kernel->sram_begin_;
+    insn->uop_end = kernel->sram_end_;
+    const std::vector<UopKernel::LoopEntry> &loop = kernel->loop();
+    if (loop.size() > 0) {
+      insn->iter_out = loop[0].extent;
+      insn->wgt_factor_out = loop[0].wgt_factor;
+      insn->src_factor_out = loop[0].src_factor;
+      insn->dst_factor_out = loop[0].dst_factor;
+    } else {
+      insn->iter_out = 1;
+      insn->wgt_factor_out = 0;
+      insn->src_factor_out = 0;
+      insn->dst_factor_out = 0;
+    }
+    if (loop.size() > 1) {
+      insn->iter_in = loop[1].extent;
+      insn->wgt_factor_in = loop[1].wgt_factor;
+      insn->src_factor_in = loop[1].src_factor;
+      insn->dst_factor_in = loop[1].dst_factor;
+    } else {
+      insn->iter_in = 1;
+      insn->wgt_factor_in = 0;
+      insn->src_factor_in = 0;
+      insn->dst_factor_in = 0;
+    }
+  }
+
+  void PushXPGEMMOp(UopKernel* kernel) {
+    uop_queue_.Push(kernel,
+                    [this]() { this->AutoSync(); });
+    if (uop_queue_.pending()) {
+      VTAMemInsn* insn = insn_queue_.CreateMemInsn(VTA_MEM_ID_UOP);
+      insn->opcode = VTA_OPCODE_LOAD;
+      uop_queue_.FlushUopLoad(insn);
+    }
+    VTAGemInsn* insn = insn_queue_.CreateGemInsn();
+    insn->opcode = VTA_OPCODE_XP_GEMM;
     insn->reset_reg = kernel->reset_out_;
     insn->uop_bgn = kernel->sram_begin_;
     insn->uop_end = kernel->sram_end_;
@@ -1513,6 +1598,16 @@ int VTAPushGEMMOp(VTACommandHandle cmdH,
                   int nbytes) {
   static_cast<vta::CommandQueue*>(cmdH)->
       PushGEMMOp(uop_handle, finit, signature, nbytes);
+  return 0;
+}
+
+int VTAPushXPGEMMOp(VTACommandHandle cmdH,
+                  void** uop_handle,
+                  int (*finit)(void*,VTACommandHandle cmdH),
+                  void* signature,
+                  int nbytes) {
+  static_cast<vta::CommandQueue*>(cmdH)->
+      PushXPGEMMOp(uop_handle, finit, signature, nbytes);
   return 0;
 }
 

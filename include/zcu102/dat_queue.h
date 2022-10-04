@@ -520,6 +520,7 @@ class InsnQueue : public BaseQueue<VTAGenericInsn> {
             if (c.mem.push_next_dep) g2s_queue++;
         }
       } else if (c.mem.opcode == VTA_OPCODE_GEMM ||
+                 c.mem.opcode == VTA_OPCODE_XP_GEMM ||
                  c.mem.opcode == VTA_OPCODE_ALU) {
         // Print instruction field information
         if (c.gemm.pop_prev_dep) l2g_queue--;
@@ -628,6 +629,7 @@ class InsnQueue : public BaseQueue<VTAGenericInsn> {
   // Get stage of the computation
   static PipelineStage GetPipelineStage(VTAMemInsn* insn) {
     if (insn->opcode == VTA_OPCODE_GEMM) return kComputeStage;
+    if (insn->opcode == VTA_OPCODE_XP_GEMM) return kComputeStage;
     if (insn->opcode == VTA_OPCODE_ALU) return kComputeStage;
     if (insn->opcode == VTA_OPCODE_LOAD) {
       if (insn->x_size == 0) return kNoneStage;

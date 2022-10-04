@@ -249,6 +249,11 @@ TVM_DLL int VTAPushGEMMOp(VTACommandHandle cmdH,
                           void* signature,
                           int nbytes);
 
+TVM_DLL int VTAPushXPGEMMOp(VTACommandHandle cmdH,
+                          void** uop_handle,
+                          int (*finit)(void*, VTACommandHandle cmdH),
+                          void* signature,
+                          int nbytes);
 /*!
  * \brief Push ALU uop kernel into the command handle.
  * \param uop_handle The uop cache handle.

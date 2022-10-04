@@ -121,7 +121,8 @@ extern "C" {
 /*! Instruction opcode field bitwidth */
 #define VTA_OPCODE_BIT_WIDTH 3
 /*! ALU opcode field bitwidth */
-#define VTA_ALU_OPCODE_BIT_WIDTH 2  // 2->3 hanged for evta
+//#define VTA_ALU_OPCODE_BIT_WIDTH 2  // 2->3 hanged for evta
+#define VTA_ALU_OPCODE_BIT_WIDTH 3  // 2->3 hanged for evta
 
 /*! Opcode: load encoding */
 #define VTA_OPCODE_LOAD 0
@@ -133,6 +134,8 @@ extern "C" {
 #define VTA_OPCODE_FINISH 3
 /*! Opcode: ALU encoding */
 #define VTA_OPCODE_ALU 4
+/*! Opcode: XP GEMM encoding */
+#define VTA_OPCODE_XP_GEMM 5
 
 /*! ALU opcode: unary min op */
 #define VTA_ALU_OPCODE_MIN 0
@@ -333,6 +336,42 @@ typedef struct {
   //uint64_t pad_1          : 64;  
 } VTAGemInsn;
 
+/* XP_GEMM instruction*/
+typedef struct {
+  /*! \brief The instruction opcode */
+  uint64_t opcode         : VTA_OPCODE_BIT_WIDTH;
+  /*! \brief Pop dependence token from load stage */
+  uint64_t pop_prev_dep   : 1;
+  /*! \brief Pop dependence token from store stage */
+  uint64_t pop_next_dep   : 1;
+  /*! \brief Push dependence token to load stage */
+  uint64_t push_prev_dep  : 1;
+  /*! \brief Push dependence token to store stage */
+  uint64_t push_next_dep  : 1;
+  /*! \brief Reset register */
+  uint64_t reset_reg      : 1;
+  /*! \brief Micro-op begin address */
+  uint64_t uop_bgn        : VTA_LOG_UOP_BUFF_DEPTH;
+  /*! \brief Micro-op end address */
+  uint64_t uop_end        : VTA_LOG_UOP_BUFF_DEPTH + 1;
+  /*! \brief Iterations in the outer uop execution loop */
+  uint64_t iter_out       : VTA_LOOP_ITER_WIDTH;
+  /*! \brief Iterations in the inner uop execution loop */
+  uint64_t iter_in        : VTA_LOOP_ITER_WIDTH;
+  /*! \brief Outer loop accumulator memory index factor */
+  uint64_t dst_factor_out : VTA_LOG_ACC_BUFF_DEPTH;
+  /*! \brief Inner loop accumulator memory index factor */
+  uint64_t dst_factor_in  : VTA_LOG_ACC_BUFF_DEPTH;
+  /*! \brief Outer loop input memory index factor */
+  uint64_t src_factor_out : VTA_LOG_INP_BUFF_DEPTH;
+  /*! \brief Inner loop input memory index factor */
+  uint64_t src_factor_in  : VTA_LOG_INP_BUFF_DEPTH;
+  /*! \brief Outer loop weight memory index factor */
+  uint64_t wgt_factor_out : VTA_LOG_WGT_BUFF_DEPTH;
+  /*! \brief Inner loop weight memory index factor */
+  uint64_t wgt_factor_in  : VTA_LOG_WGT_BUFF_DEPTH;
+} VTAXPGemInsn;
+
 /*! \brief VTA ALU instruction
 *   ALU instruction is implemented by executing a sequence of micro-operations
 *   that is read in the local micro-op memory, delimited by \a uop_bgn and
@@ -409,6 +448,8 @@ union VTAInsn {
   VTAMemInsn mem;
   /*! \brief VTA GEMM instruction */
   VTAGemInsn gemm;
+  /*! \brief VTA XP GEMM instruction */
+  VTAXPGemInsn xp_gemm;
   /*! \brief VTA ALU instruction */
   VTAAluInsn alu;
 };

@@ -170,9 +170,21 @@ int VTAPushGEMMOp(VTACommandHandle cmd,
                   int nbytes,
                   bool from_outmem) {
 	//printf("VTAPushGEMMOp %p, %p, %p, %d\n",uop_handle, finit, signature, nbytes);
-	
+
   static_cast<vta::CommandQueue*>(cmd)->
       PushGEMMOp(uop_handle, finit, signature, nbytes, from_outmem);
+  return 0;
+}
+
+int VTAPushXPGEMMOp(VTACommandHandle cmd,
+                  void** uop_handle,
+                   int (*finit)(void*,VTACommandHandle),
+                  void* signature,
+                  int nbytes,
+                  bool from_outmem) {
+
+  static_cast<vta::CommandQueue*>(cmd)->
+      PushXPGEMMOp(uop_handle, finit, signature, nbytes, from_outmem);
   return 0;
 }
 

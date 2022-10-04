@@ -81,6 +81,13 @@ int VTAPushGEMMOp(VTACommandHandle cmdH,
                   int nbytes,
                   bool from_outmem
                   ) ;
+int VTAPushXPGEMMOp(VTACommandHandle cmdH,
+                  void** uop_handle,
+                  int (*finit)(void*,VTACommandHandle),
+                  void* signature,
+                  int nbytes,
+                  bool from_outmem
+                  ) ;
 int VTAPushALUOp(VTACommandHandle cmdH,
                  void** uop_handle,
                  int (*finit)(void*,VTACommandHandle),
