@@ -333,6 +333,32 @@ class CommandQueue {
     this->CheckInsnOverFlow();
   }
 
+  void PushXPGEMMOp(void** uop_handle,
+                  int (*finit)(void*,VTACommandHandle),
+                  void* signature,
+                  int nbytes,
+                  bool from_outmem=false) {
+    UopKernelMap** uptr = reinterpret_cast<UopKernelMap**>(uop_handle);
+    
+    if (uptr[0] == nullptr) {
+      uptr[0] = new UopKernelMap();
+    }
+    UopKernel** kptr = uptr[0]->Get(signature, nbytes);
+    if (kptr[0] == nullptr) {
+      record_kernel_ = new UopKernel(static_cast<char*>(signature), nbytes);
+      CHECK_EQ((*finit)(signature,this), 0);
+      kptr[0] = static_cast<UopKernel*>(record_kernel_);
+
+      if (debug_flag_ & VTA_DEBUG_DUMP_UOP) {
+          printf("dump kernel\n");
+        record_kernel_->Dump();
+      }
+      record_kernel_ = nullptr;
+    }
+    this->PushXPGEMMOp(static_cast<UopKernel*>(kptr[0]), from_outmem);
+    this->CheckInsnOverFlow();
+  }
+
   void PushALUUop(void** uop_handle,
                   int (*finit)(void*,VTACommandHandle),
                   void* signature,
@@ -452,7 +478,45 @@ class CommandQueue {
       insn->dst_factor_in = 0;
     }
   }
-
+  // Push XP GEMM uop to the command buffer
+  void PushXPGEMMOp(UopKernel* kernel, bool from_outmem=false) {
+    uop_queue_.Push(kernel,
+                    [this]() { this->AutoSync(); });
+    if (uop_queue_.pending()) {
+      VTAMemInsn* insn = insn_queue_.CreateMemInsn(VTA_MEM_ID_UOP);
+      insn->opcode = VTA_OPCODE_LOAD;
+      uop_queue_.FlushUopLoad(insn);
+    }
+    VTAGemInsn* insn = insn_queue_.CreateGemInsn();
+    insn->opcode = VTA_OPCODE_XP_GEMM;
+    insn->reset_reg = kernel->reset_out_;
+    insn->uop_bgn = kernel->sram_begin_;
+    insn->uop_end = kernel->sram_end_;
+    insn->gemm_from_output = from_outmem;
+    const std::vector<UopKernel::LoopEntry> &loop = kernel->loop();
+    if (loop.size() > 0) {
+      insn->iter_out = loop[0].extent;
+      insn->wgt_factor_out = loop[0].wgt_factor;
+      insn->src_factor_out = loop[0].src_factor;
+      insn->dst_factor_out = loop[0].dst_factor;
+    } else {
+      insn->iter_out = 1;
+      insn->wgt_factor_out = 0;
+      insn->src_factor_out = 0;
+      insn->dst_factor_out = 0;
+    }
+    if (loop.size() > 1) {
+      insn->iter_in = loop[1].extent;
+      insn->wgt_factor_in = loop[1].wgt_factor;
+      insn->src_factor_in = loop[1].src_factor;
+      insn->dst_factor_in = loop[1].dst_factor;
+    } else {
+      insn->iter_in = 1;
+      insn->wgt_factor_in = 0;
+      insn->src_factor_in = 0;
+      insn->dst_factor_in = 0;
+    }
+  }
   // Push ALU uop to the command buffer
   void PushALUUop(UopKernel* kernel) {
     uop_queue_.Push(kernel,

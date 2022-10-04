@@ -228,78 +228,6 @@ int cpunonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, i
 
 }
 
-template <typename T>
-int bnn_cpunonvtaconvolution(T input, int8_t *kernel, int32_t *bias, int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
-                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
-    dim_t inCperG = C / group;
-    dim_t outCperG = KN / group;
-    for (dim_t n = 0; n < N; n++) {
-        // For each group of input channels:
-        for (dim_t g = 0; g < group; g++) {
-
-            // For each output channel in the group:
-            for (dim_t d = g * outCperG; d < (g + 1) * outCperG; d++) {
-
-                // For each convolution 'jump' in the input tensor:
-                ssize_t x = -ssize_t(pad_size);
-                for (dim_t ax = 0; ax < out_h; x += stride_size, ax++) {
-                    ssize_t y = -ssize_t(pad_size);
-                    for (dim_t ay = 0; ay < out_w; y += stride_size, ay++) {
-
-                        // For each element in the convolution-filter:
-                        int32_t sum = 0;
-                        for (dim_t fx = 0; fx < KH; fx++) {
-                            for (dim_t fy = 0; fy < KW; fy++) {
-                                int64_t ox = x + fx * dilation;
-                                int64_t oy = y + fy * dilation;
-
-                                // Ignore index access below zero (this is due to padding).
-                                if (ox < 0 || oy < 0 || ox >= ssize_t(H) ||
-                                    oy >= int64_t(W)) {
-                                    continue;
-                                }
-                                for (dim_t fd = 0; fd < inCperG; fd++) {
-
-                                    int32_t F = (int32_t)*(kernel+d*KH*KW*inCperG + fx*KW*inCperG + fy*inCperG + fd);
-				    int32_t I;
-
-                                    if(C == 3) I = (uint8_t)*(input+n*H*W*C + ox*W*C + oy*C+ (g*inCperG +fd));				    
-                                    else I = (int8_t)*(input+n*H*W*C + ox*W*C + oy*C+ (g*inCperG +fd));
-                                    
-
-				    // We represent the element multiplication with offset as
-                                    // (value - offset).
-                                    sum += ((F) * (I)) * 128;
-                                }
-                            }
-                        }
-
-                        // Scale the bias to match the scale of the matrix multiplication.
-                        int32_t B =std::round(float(*((int32_t *)(bias +d))));
-
-                        // Add the bias.
-                        sum += B;
-
-                        if(doRelu && sum<0){
-                            sum = 0;
-                        }
-                        // Scale the result back to the expected destination scale.
-                        int32_t out32 = (std::round(float(sum)));
-                        out32 = out32 >> 7;
-                        int8_t out8;
-                        if(out32>127) out8=127;
-                        else if(out32<-128) out8=-128;
-                        else out8=(int8_t)out32;
-                        *(output + n*out_h*out_w*KN + ax*out_w*KN + ay*KN + d) = out8;
-                    } // W
-                }   // H
-            }     // C
-        }       // G
-    }         // NS
-
-    return 0;
-
-}
 
 int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
                       int8_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
@@ -341,32 +269,6 @@ int nonvtaconvolution(int8_t* input, float inputScale, int32_t inputOffset, int8
                         stride_size, group, dilation, doRelu, doBias, out_h, out_w);
   }
   return 0;
-}
-
-int bnn_nonvtaconvolution(int8_t* input, int8_t *kernel, int32_t *bias,  int8_t *output, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
-                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
-
-  /*
-  float scale =  0;
-  uint32_t shift = 0;
-  {
-    while(tempScale<scale)
-    {
-      tempScale *= 2;
-      shift++;
-    }
-  }
-  */
-  if(C == 3) {
-      bnn_cpunonvtaconvolution((uint8_t *)input, kernel, bias, output, N, H, W, C, KN, KH, KW, pad_size,
-                        stride_size, group, dilation, doRelu, doBias, out_h, out_w);
-  }
-  else {
-      bnn_cpunonvtaconvolution((int8_t *)input, kernel, bias, output, N, H, W, C, KN, KH, KW, pad_size,
-                        stride_size, group, dilation, doRelu, doBias, out_h, out_w);
-  }
-
- return 0;
 }
 
 
@@ -415,50 +317,83 @@ int cpuFullyConnected(int8_t* input, float inputScale, int32_t inputOffset, int8
 
 }
 
-int bnn_cpuFullyConnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
-                         int32_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset,
-                      dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias) {
-
-
-    //dim_t inCperG = C / group;
-    //dim_t outCperG = KN / group
-
+int bnn_cpunonvtaconvolution_scale(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
+                      int8_t *bias, float biasScale, int32_t biasOffset, int8_t *scalefactor, int8_t *output, int32_t outputShift, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
+                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
+    dim_t inCperG = C / group;
+    dim_t outCperG = KN / group;
     float matMulScale = inputScale * kernelScale;
+    for (dim_t n = 0; n < N; n++) {
+        // For each group of input channels:
+        for (dim_t g = 0; g < group; g++) {
 
+            // For each output channel in the group:
+            for (dim_t d = g * outCperG; d < (g + 1) * outCperG; d++) {
 
+                // For each convolution 'jump' in the input tensor:
+                ssize_t x = -ssize_t(pad_size);
+                for (dim_t ax = 0; ax < out_h; x += stride_size, ax++) {
+                    ssize_t y = -ssize_t(pad_size);
+                    for (dim_t ay = 0; ay < out_w; y += stride_size, ay++) {
 
-    for (dim_t i = 0; i < inputDim0; i++) {
-        for (dim_t j = 0; j < outputDim1; j++) {
-            int32_t sum = 0;
-            for (dim_t k = 0; k < inputDim1; k++) {
-                int32_t W = (int32_t)*(kernel+k*kernelDim1 + j);
-                int32_t A = (int32_t)*(input+i*inputDim1 + k);
-                sum += (W - kernelOffset) * (A - inputOffset);
-            }
+                        // For each element in the convolution-filter:
+                        int32_t sum = 0;
+                        for (dim_t fx = 0; fx < KH; fx++) {
+                            for (dim_t fy = 0; fy < KW; fy++) {
+                                int64_t ox = x + fx * dilation;
+                                int64_t oy = y + fy * dilation;
 
-            // Scale the bias to match the scale of the matrix multiplication.
-            int32_t B =std::round(float(*(int32_t *)bias+j));
+                                // Ignore index access below zero (this is due to padding).
+                                if (ox < 0 || oy < 0 || ox >= ssize_t(H) ||
+                                    oy >= int64_t(W)) {
+                                    continue;
+                                }
+                                for (dim_t fd = 0; fd < inCperG; fd++) {
 
-            // Add the bias.
-            sum += B;
+                                    int32_t F = (int32_t)*(kernel+d*KH*KW*inCperG + fx*KW*inCperG + fy*inCperG + fd);
+                                    int32_t I = (int32_t)*(input+n*H*W*C + ox*W*C + oy*C+ (g*inCperG +fd));
+                                    //uint8_t I = (uint8_t)*(input+n*H*W*C + ox*W*C + oy*C+ (g*inCperG +fd));
+                                    // We represent the element multiplication with offset as
+                                    // (value - offset).
+                                    sum += (F - kernelOffset) * (I - inputOffset);
+                                }
+                            }
+                        }
+                        int32_t S = (*((int32_t *)scalefactor + d));
+                        // Scale the bias to match the scale of the matrix multiplication.
+                        int32_t B =std::round(float(*((int32_t *)bias+d) - biasOffset) * (biasScale / matMulScale));
+                        // Add the bias.
+                        sum += B;
+                        sum *= S;
 
-            // Scale the result back to the expected destination scale.
-
-            int32_t out32 = std::round(float(sum));
-            int8_t out8;
-            if(out32>127) out8=127;
-            else if(out32<-128) out8=-128;
-            else out8=(int8_t)out32;
-
-            *(output + i*outputDim1 + j) = out8;
-
-        }
-    }
-
+                        int32_t out32 = int32_t(std::round(float(sum) / (1 << outputShift)));
+                        // Scale the result back to the expected destination scale.
+                        //int32_t out32 = std::round(float(sum) * (matMulScale / outputScale) + outputOffset);
+                        int8_t out8;
+                        if(out32>127) out8=127;
+                        else if(out32<-128) out8=-128;
+                        else out8=(int8_t)out32;
+                        *(output + n*out_h*out_w*KN + ax*out_w*KN + ay*KN + d) = out8;
+                    } // W
+                }   // H
+            }     // C
+        }       // G
+    }         // NS
     return 0;
 
 }
 
+int bnn_nonvtaconvolution_scale(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
+                      int8_t *bias, float biasScale, int32_t biasOffset, int8_t* scalefactor, int8_t *output, int32_t outputShift, int32_t outputOffset, dim_t N, dim_t H, dim_t W, dim_t C, dim_t KN, dim_t KH, dim_t KW, int pad_size,
+                      int stride_size, size_t group, size_t dilation, bool doRelu, bool doBias, int out_h, int out_w) {
+
+  //int32_t biasOffset = biasOffset;
+  bnn_cpunonvtaconvolution_scale(input, inputScale, inputOffset, kernel, kernelScale, kernelOffset,
+                    bias, biasScale, biasOffset, scalefactor, output, outputShift, outputOffset, N, H, W, C, KN, KH, KW, pad_size,
+                    stride_size, group, dilation, doRelu, doBias, out_h, out_w);
+
+  return 0;
+}
 
 
 int fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
@@ -466,16 +401,6 @@ int fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t 
                    dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias) {
 
     cpuFullyConnected(input, inputScale, inputOffset, kernel, kernelScale, kernelOffset,
-                         bias, biasScale, biasOffset, output, outputScale, outputOffset,
-                         inputDim0, inputDim1, kernelDim0, kernelDim1, outputDim0, outputDim1, doBias);
-  return 0;
-}
-
-int bnn_fullyconnected(int8_t* input, float inputScale, int32_t inputOffset, int8_t *kernel, float kernelScale, int32_t kernelOffset,
-                   int32_t *bias, float biasScale, int32_t biasOffset, int8_t *output, float outputScale, int32_t outputOffset,
-                   dim_t inputDim0, dim_t inputDim1, dim_t kernelDim0, dim_t kernelDim1, dim_t outputDim0, dim_t outputDim1, bool doBias) {
-
-    bnn_cpuFullyConnected(input, inputScale, inputOffset, kernel, kernelScale, kernelOffset,
                          bias, biasScale, biasOffset, output, outputScale, outputOffset,
                          inputDim0, inputDim1, kernelDim0, kernelDim1, outputDim0, outputDim1, doBias);
   return 0;
@@ -635,15 +560,6 @@ int dequantize(int8_t *input, int8_t *output, dim_t size, float scale, int32_t o
 
 
 }
-
-int typecast(int8_t *input, int8_t *output, dim_t size, float scale, int32_t offset){
-    for(int i = 0; i < size; i++){
-        int8_t in = *(input + i);
-        *(output+i) = in;
-    }
-  return 0;
-}
-
 
 int8_t* at(int8_t *input, dim_t dim0, dim_t dim1, dim_t dim2, dim_t dim3,
               dim_t loc0, dim_t loc1, dim_t loc2, dim_t loc3){
@@ -899,6 +815,25 @@ int elemadd(int8_t *input0, float input0Scale, int32_t input0Offset, int8_t *inp
   return 0;
 }
 
+int elemadd_scale(int8_t *input0, int8_t *input1, int8_t *output, float destScale, int32_t size) {
+
+  for (dim_t i = 0, e = size; i < e; i++) {
+    int32_t L = input0[i];
+    int32_t R = input1[i];
+    // We increase the size of the integer up to 16 bits to prevent overflow.
+    int32_t sum32 = (L + R);
+    sum32 = std::round(float(sum32) * destScale);
+    int8_t out8;
+    if(sum32>127) out8=127;
+    else if(sum32<-128) out8=-128;
+    else out8=(int8_t)sum32;
+    output[i] = out8;
+  }
+  return 0;
+}
+
+
+
 int elemsign(int8_t *input, int8_t *output, unsigned_t size) {
 
   for (size_t i = 0, e = size; i < e; i++) {
@@ -1140,7 +1075,7 @@ void transpose_nhwc2vtaio_pack(int8_t* input, int8_t* output, int N, int H, int 
   int8_t *IN_NHWC = input;
   //int8_t *NHWC_PACK = (int8_t *)calloc(N*C*H*W, sizeof(int8_t));
   int8_t *NHWC_PACK = (int8_t *)malloc(N*C*H*W);
-  memset(NHWC_PACK, 0, N*H*W*C);  
+  memset(NHWC_PACK, 0, N*H*W*C);
 
   for (int n = 0; n < N; ++n) {
     for (int h = 0; h < H; ++h) {
@@ -1189,3 +1124,64 @@ void transpose_nhwc2vtaio_pack(int8_t* input, int8_t* output, int N, int H, int 
   free(IN_NCHW);
 }
 
+void transpose_nhwc2vtaio_pack_zerofill(int8_t* input, int8_t* output, int N, int H, int W, int C){
+
+  int8_t *IN_NHWC = input;
+  int8_t *NHWC_PACK = (int8_t *)malloc(N*C*H*W);
+  memset(NHWC_PACK, 0, N*H*W*C);
+
+  for (int n = 0; n < N; ++n) {
+    for (int h = 0; h < H; ++h) {
+      for (int w = 0; w < W; ++w) {
+        for (int c = 0; c < C; ++c) {
+          for(int bw = 0; bw < 8; ++bw){
+            *(NHWC_PACK + n*H*W*C + h*W*C + w*C + c) +=
+                (int(*(IN_NHWC + n*H*W*(C*8) + h*W*(C*8) + w*(C*8) + (c * 8 + bw)) > 0) << bw);
+          }
+        }
+      }
+    }
+  }
+
+  int8_t *in_PACK_NHWC = NHWC_PACK;
+  int8_t *IN_NCHW = (int8_t *)malloc(N*C*H*W);
+
+  for (int n = 0; n < N; n++) {
+    for (int h = 0; h < H; h++) {
+      for (int w = 0; w < W; w++) {
+        for (int c = 0; c < C; c++) {
+          *(IN_NCHW + n*C*H*W + c*H*W + h*W + w) =
+                  *(in_PACK_NHWC + n*H*W*C + h*W*C + w*C + c);
+        }
+      }
+    }
+  }
+
+
+  int8_t *NEW_DATA = (int8_t *)malloc(N*16*H*W);
+  memset(NEW_DATA, 0, N*16*H*W);
+  for (int k = 0; k < N*C*H*W; k++) {
+    *(NEW_DATA + k) = *(IN_NCHW + k);
+  }
+
+
+  // reshape input NCHW -> N{C//16}16HW
+  int8_t *in_NC_16HW = NEW_DATA;
+
+  for (int n = 0; n < N; n++) {
+    for (int c_ = 0; c_ < 16 / 16; c_++) {
+      for (int h = 0; h < H; h++) {
+        for (int w = 0; w < W; w++) {
+          for (int c = 0; c < 16; c++) {
+            *(output + n*(16/16)*H*W*16 + c_*H*W*16 + h*W*16 + w*16 + c) =
+                *(in_NC_16HW + n*(16/16)*16*H*W + c_*16*H*W + c*H*W + h*W + w);
+          }
+        }
+      }
+    }
+  }
+
+  free(NHWC_PACK);
+  free(IN_NCHW);
+  free(NEW_DATA);
+}

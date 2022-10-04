@@ -212,6 +212,14 @@ class SRAM {
   DType* data_;
 };
 
+int32_t round(float x)
+{
+  if (x < 0.0)
+      return (int32_t)(x - 0.5);
+  else
+      return (int32_t)(x + 0.5);
+}
+
 
 /*!
  * \brief Memory information of special memory region.
@@ -299,11 +307,13 @@ class Device {
     Device * device = reinterpret_cast<Device *> (dev);
     const VTAMemInsn* mem = reinterpret_cast<const VTAMemInsn*>(insn);
     const VTAGemInsn* gem = reinterpret_cast<const VTAGemInsn*>(insn);
+    const VTAXPGemInsn* xp_gem = reinterpret_cast<const VTAXPGemInsn*>(insn);
     const VTAAluInsn* alu = reinterpret_cast<const VTAAluInsn*>(insn);
     switch (mem->opcode) {
       case VTA_OPCODE_LOAD: device->RunLoad(mem); break;
       case VTA_OPCODE_STORE: device->RunStore(mem); break;
       case VTA_OPCODE_GEMM: device->RunGEMM(gem); break;
+      case VTA_OPCODE_XP_GEMM: device->RunXPGEMM(gem); break;
       case VTA_OPCODE_ALU: device->RunALU(alu); break;
       case VTA_OPCODE_FINISH: ++(device->finish_counter_); break;
       default: {
@@ -380,9 +390,64 @@ class Device {
                 int32_t sum = acc.GetSigned(acc_offset);
                 for (uint32_t k = 0; k < VTA_BLOCK_IN; ++k) {
                   sum +=
+                      inp.GetSigned(i * VTA_BLOCK_IN + k) *
+                      wgt.GetSigned(j * VTA_BLOCK_IN + k);
+                }
+                acc.SetSigned(acc_offset, sum);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      if (prof_->SkipExec()) return;
+      // reset
+      for (uint32_t y = 0; y < op->iter_out; ++y) {
+        for (uint32_t x = 0; x < op->iter_in; ++x) {
+          for (uint32_t uindex = op->uop_bgn; uindex < op->uop_end; ++uindex) {
+            VTAUop* uop_ptr = static_cast<VTAUop*>(uop_.BeginPtr(uindex));
+            uint32_t acc_idx = uop_ptr->dst_idx;
+            acc_idx += y * op->dst_factor_out + x * op->dst_factor_in;
+            BitPacker<VTA_ACC_WIDTH> acc(acc_.BeginPtr(acc_idx));
+            for (uint32_t i = 0; i < VTA_BATCH * VTA_BLOCK_OUT; ++i) {
+              acc.SetSigned(i, 0);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  void RunXPGEMM(const VTAGemInsn* op) {
+    if (!op->reset_reg) {
+      prof_->gemm_counter += op->iter_out * op->iter_in * (op->uop_end - op->uop_bgn);
+      if (prof_->SkipExec()) return;
+      for (uint32_t y = 0; y < op->iter_out; ++y) {
+        for (uint32_t x = 0; x < op->iter_in; ++x) {
+          for (uint32_t uindex = op->uop_bgn; uindex < op->uop_end; ++uindex) {
+            VTAUop* uop_ptr = static_cast<VTAUop*>(uop_.BeginPtr(uindex));
+            // Read in memory indices
+            uint32_t acc_idx = uop_ptr->dst_idx;
+            uint32_t inp_idx = uop_ptr->src_idx;
+            uint32_t wgt_idx = uop_ptr->wgt_idx;
+
+            acc_idx += y * op->dst_factor_out + x * op->dst_factor_in;
+            inp_idx += y * op->src_factor_out + x * op->src_factor_in;
+            wgt_idx += y * op->wgt_factor_out + x * op->wgt_factor_in;
+            BitPacker<VTA_ACC_WIDTH> acc(acc_.BeginPtr(acc_idx));
+            BitPacker<VTA_INP_WIDTH> inp(inp_.BeginPtr(inp_idx));
+            BitPacker<VTA_WGT_WIDTH> wgt(wgt_.BeginPtr(wgt_idx));
+
+            // gemm loop
+            for (uint32_t i = 0; i < VTA_BATCH; ++i) {
+              for (uint32_t j = 0; j < VTA_BLOCK_OUT; ++j) {
+                uint32_t acc_offset = i * VTA_BLOCK_OUT + j;
+                int32_t sum = acc.GetSigned(acc_offset);
+                for (uint32_t k = 0; k < VTA_BLOCK_IN; ++k) {
+                  sum +=
                      (__builtin_popcount(static_cast<uint8_t>(
                       ~(static_cast<uint8_t>(inp.GetSigned(i * VTA_BLOCK_IN + k)) ^
-                      static_cast<uint8_t>(wgt.GetSigned(j * VTA_BLOCK_IN + k))))) * 2 - 8) * 128;
+                      static_cast<uint8_t>(wgt.GetSigned(j * VTA_BLOCK_IN + k))))) * 2 - 8);
                 }
                 acc.SetSigned(acc_offset, sum);
               }
@@ -438,10 +503,17 @@ class Device {
       case VTA_ALU_OPCODE_SHR: {
         return RunALULoop<use_imm>(op, [](int32_t x, int32_t y) {
             if (y >= 0) {
-              return x >> y;
+              int32_t res = round(float(x) / (1 << y));
+              if(res != 0) return res;
+              else return (x >> y);
             } else {
               return x << (-y);
             }
+          });
+      }
+      case VTA_ALU_OPCODE_MUL: {
+        return RunALULoop<use_imm>(op, [](int32_t x, int32_t y) {
+            return x * y;
           });
       }
       default: {
