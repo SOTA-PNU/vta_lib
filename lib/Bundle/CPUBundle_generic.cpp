@@ -1185,3 +1185,38 @@ void transpose_nhwc2vtaio_pack_zerofill(int8_t* input, int8_t* output, int N, in
   free(IN_NCHW);
   free(NEW_DATA);
 }
+
+void transpose_nhwc2vtaio_zerofill(int8_t* input, int8_t* output, int N, int H, int W, int C){
+  int8_t *IN_NHWC = input;
+
+  int8_t *IN_NCHW = (int8_t *)malloc(N*C*H*W);
+  memset(IN_NCHW, 0, N*C*H*W);
+
+  for (int n = 0; n < N; n++) {
+    for (int h = 0; h < H; h++) {
+      for (int w = 0; w < W; w++) {
+        for (int c = 0; c < 3; c++) {
+          *(IN_NCHW + n*3*H*W + c*H*W + h*W + w)=*(IN_NHWC + n*H*W*3 + h*W*3 + w*3 + c);
+        }
+      }
+    }
+  }
+
+  // reshape input NCHW -> N{C//16}16HW
+  int8_t *in_NC_16HW = IN_NCHW;
+
+  for (int n = 0; n < N; n++) {
+    for (int c_ = 0; c_ < C / 16; c_++) {
+      for (int h = 0; h < H; h++) {
+        for (int w = 0; w < W; w++) {
+          for (int c = 0; c < 16; c++) {
+            *(output + n*(C/16)*H*W*16 + c_*H*W*16 + h*W*16 + w*16 + c) =
+                *(in_NC_16HW + n*(C/16)*16*H*W + c_*16*H*W + c*H*W + h*W + w);
+          }
+        }
+      }
+    }
+  }
+
+  free(IN_NCHW);
+}
