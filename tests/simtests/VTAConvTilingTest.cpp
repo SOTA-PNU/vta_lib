@@ -147,3 +147,40 @@ TEST(VTAConvTilingTest, SsdExtraLayers) {
   runCase({3, 3, 256, 128, 1, 0, 1, true, 6});
   runCase({3, 3, 128, 256, 3, 0, 1, true, 6});
 }
+
+// Every VTA convolution of SSD300-VGG16, in network order, on one command
+// handle. The micro-op kernels no longer fit the micro-op SRAM, so this covers
+// the wrap-around of the micro-op cache (lib/simulator/runtime.cc UopQueue).
+// Takes about 15 s on the simulator.
+TEST(VTAConvTilingTest, SsdAllLayers) {
+  const ConvCase cases[] = {
+    {300, 300, 64, 64, 3, 1, 1, true, 6},
+    {150, 150, 64, 128, 3, 1, 1, true, 6},
+    {150, 150, 128, 128, 3, 1, 1, true, 6},
+    {75, 75, 128, 256, 3, 1, 1, true, 6},
+    {75, 75, 256, 256, 3, 1, 1, true, 6},
+    {75, 75, 256, 256, 3, 1, 1, true, 6},
+    {38, 38, 256, 512, 3, 1, 1, true, 6},
+    {38, 38, 512, 512, 3, 1, 1, true, 6},
+    {38, 38, 512, 512, 3, 1, 1, true, 6},
+    {38, 38, 512, 16, 3, 1, 1, false, 6},
+    {19, 19, 512, 512, 3, 1, 1, true, 6},
+    {19, 19, 512, 512, 3, 1, 1, true, 6},
+    {19, 19, 512, 512, 3, 1, 1, true, 6},
+    {19, 19, 1024, 1024, 1, 0, 1, true, 6},
+    {19, 19, 1024, 256, 1, 0, 1, true, 6},
+    {19, 19, 256, 512, 3, 1, 2, true, 6},
+    {10, 10, 512, 128, 1, 0, 1, true, 6},
+    {10, 10, 128, 256, 3, 1, 2, true, 6},
+    {5, 5, 256, 128, 1, 0, 1, true, 6},
+    {5, 5, 128, 256, 3, 0, 1, true, 6},
+    {3, 3, 256, 128, 1, 0, 1, true, 6},
+    {3, 3, 128, 256, 3, 0, 1, true, 6},
+    {1, 1, 256, 16, 1, 0, 1, false, 6},
+    {3, 3, 256, 16, 3, 1, 1, false, 6}};
+  int i = 0;
+  for (const auto &c : cases) {
+    SCOPED_TRACE(i++);
+    runCase(c);
+  }
+}

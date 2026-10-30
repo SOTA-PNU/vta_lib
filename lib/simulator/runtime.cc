@@ -399,7 +399,12 @@ class UopQueue : public BaseQueue<VTAUop> {
     CHECK(num_op <= kMaxNumUop);
     uint32_t uop_begin = 0;
     if (sram_end_ + num_op > kMaxNumUop) {
-      // Need to evict
+      // Need to evict. The micro-op loads already queued in this batch address
+      // the DRAM buffer by their kernel's position in cache_, and wrapping
+      // around inserts this kernel in front of them, so run the batch first.
+      if (!cache_.empty()) {
+        fautosync();
+      }
       printf("warning: EVTA uop buffer overflowed. No longer uop instruction can be reused.\n");
       cache_idx_ = 0;
       sram_begin_ = 0;
@@ -423,6 +428,32 @@ class UopQueue : public BaseQueue<VTAUop> {
     cache_.insert(cache_.begin() + cache_idx_, kernel);
     cache_.erase(cache_.begin() + evict_begin, cache_.begin() + cache_idx_);
     cache_idx_ = evict_begin + 1;
+    InvalidateOverwritten(kernel);
+  }
+  /*!
+   * \brief Marks kernels loaded before the last Reset()/UopReset() as no
+   *  longer cached if \p kernel now occupies their SRAM range.
+   *
+   *  cache_ only lists the kernels of the current batch, so the eviction loop
+   *  in Push() cannot see older kernels. Without this, a kernel whose micro-ops
+   *  were overwritten after the buffer wrapped around stays "cached" and is
+   *  reused with the wrong micro-ops.
+   */
+  void InvalidateOverwritten(UopKernel* kernel) {
+    std::vector<UopKernel*> kept;
+    for (UopKernel* k : resident_) {
+      if (k == kernel || !k->cached()) continue;
+      bool inBatch = std::find(cache_.begin(), cache_.end(), k) != cache_.end();
+      if (!inBatch && k->sram_begin_ < kernel->sram_end_ &&
+          kernel->sram_begin_ < k->sram_end_) {
+        k->sram_begin_ = 0;
+        k->sram_end_ = 0;
+        continue;
+      }
+      kept.push_back(k);
+    }
+    kept.push_back(kernel);
+    resident_.swap(kept);
   }
   // Flush micro op load instruction
   void FlushUopLoad(VTAMemInsn* insn) {
@@ -495,6 +526,8 @@ class UopQueue : public BaseQueue<VTAUop> {
   uint32_t cache_idx_{0};
   // Cached ring, sorted by sram_begin
   std::vector<UopKernel*> cache_;
+  // Every kernel currently marked as cached, including earlier batches
+  std::vector<UopKernel*> resident_;
   // Constants
   static constexpr int kElemBytes = sizeof(VTAUop);
   static constexpr int kMaxNumUop = VTA_UOP_BUFF_DEPTH;
