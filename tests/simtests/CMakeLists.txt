@@ -18,3 +18,15 @@ set_target_properties( VTABackendSimulatorTest
         )
 
 
+
+# Bundle library checks: the layout-independent operators
+# (lib/Bundle/CPUBundle_common.cpp) and convolution tiling on the simulator.
+add_executable(VTABundleOpsTest
+        VTABundleOpsTest.cpp
+        VTAConvTilingTest.cpp
+        )
+target_link_libraries(VTABundleOpsTest gtest gtest_main VTABundle)
+set_target_properties(VTABundleOpsTest
+        PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${NESTC_BINARY_DIR}/tests"
+        )

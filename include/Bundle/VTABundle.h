@@ -124,4 +124,30 @@ void transpose_nhwc2vtaio_pack(int8_t* input, int8_t* output, int N, int H, int 
 void transpose_nhwc2vtaio_pack_zerofill(int8_t* input, int8_t* output, int N, int H, int W, int C);
 
 void transpose_nhwc2vtaio_zerofill(int8_t* input, int8_t* output, int N, int H, int W, int C);
+
+// Layout-independent operators (CPUBundle_common.cpp). Tensors are row-major
+// with rank <= 6; data-movement ops take the element size in bytes.
+
+/// Glow Transpose: outDims[i] = inDims[shuffle[i]].
+int transpose_nd(const int8_t *input, int8_t *output, const dim_t *inDims,
+                 const unsigned_t *shuffle, unsigned_t rank,
+                 unsigned_t elemSize);
+
+/// Glow InsertTensor: writes \p count copies of input into output, copy i at
+/// offsets + i * inDims[axis] along \p axis.
+int insert_tensor(int8_t *output, const int8_t *input, const dim_t *outDims,
+                  const dim_t *inDims, const dim_t *offsets, unsigned_t rank,
+                  unsigned_t elemSize, dim_t count, unsigned_t axis);
+
+int splat_f32(int8_t *output, dim_t size, float value);
+
+int elemmul_f32(int8_t *input0, int8_t *input1, int8_t *output, dim_t size);
+
+int elemmax_f32(int8_t *input0, int8_t *input1, int8_t *output, dim_t size);
+
+int elempow_f32(int8_t *input0, int8_t *input1, int8_t *output, dim_t size);
+
+/// Glow BatchedReduceAdd: sums float input over \p axis (output drops it).
+int batched_reduce_add_f32(int8_t *input, int8_t *output, const dim_t *inDims,
+                           unsigned_t rank, unsigned_t axis);
 #endif //VTALIB_EXAMPLE_VTABUNDLE_H

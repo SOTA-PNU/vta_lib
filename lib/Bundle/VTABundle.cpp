@@ -381,7 +381,12 @@ void conv_kernel(uint32_t sizeOutTileH,
   uint32_t WGT_MEM_ENTRY = 1024;
 
   uint32_t nFilterinLoop = KN / nVirtualThread / 16 ;
-  nFilterinLoop = min(nFilterinLoop, ACC_MEM_ENTRY/ nVirtualThread / resizedOutTileH / resizedOutTileW);
+  // Tiles smaller than MIN_H_SIZE x MIN_W_SIZE are padded up to it below, so
+  // size the accumulator use with the padded tile or the ACC SRAM overflows
+  // (e.g. a 5x5 edge tile of a 19x19, 1024-channel output).
+  nFilterinLoop = min(nFilterinLoop, ACC_MEM_ENTRY / nVirtualThread /
+                                         max(resizedOutTileH, (uint32_t)MIN_H_SIZE) /
+                                         max(resizedOutTileW, (uint32_t)MIN_W_SIZE));
   for(;nFilterinLoop>0;nFilterinLoop--){
     if((KN/16) % (nFilterinLoop*nVirtualThread) ==0) break;
   }
@@ -728,8 +733,9 @@ void conv_kernel(uint32_t sizeOutTileH,
 #endif
             VTAStoreBuffer2D(vtaCmdH, outputSramBaseAddr + (hIdx+fIdx*sizeOutTileH) * resizedOutTileW + fIdx * outDummyH * resizedOutTileH,
                              4, vta_output_buf,
-                             ((filterIdx+fIdx) * nVirtualThread + threadIdx) *
-                                 out_w * out_h +
+                             (filterIdx * nVirtualThread + threadIdx) *
+                                 nFilterinLoop * out_w * out_h +
+                                 fIdx * out_w * out_h +
                                  (outputHOffset + hIdx) * out_w + outputWOffset,
                              sizeOutTileW, 1, out_w);
           }
@@ -1136,8 +1142,9 @@ void conv_kernel_scale(uint32_t sizeOutTileH,
           for (int hIdx = 0; hIdx < sizeOutTileH; hIdx++) {
             VTAStoreBuffer2D(vtaCmdH, outputSramBaseAddr + (hIdx+fIdx*sizeOutTileH) * resizedOutTileW + fIdx * outDummyH * resizedOutTileH,
                              4, vta_output_buf,
-                             ((filterIdx+fIdx) * nVirtualThread + threadIdx) *
-                                 out_w * out_h +
+                             (filterIdx * nVirtualThread + threadIdx) *
+                                 nFilterinLoop * out_w * out_h +
+                                 fIdx * out_w * out_h +
                                  (outputHOffset + hIdx) * out_w + outputWOffset,
                              sizeOutTileW, 1, out_w);
           }
