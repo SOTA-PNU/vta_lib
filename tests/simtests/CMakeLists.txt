@@ -18,3 +18,13 @@ set_target_properties( VTABackendSimulatorTest
         )
 
 
+
+# Layout-independent bundle operators (lib/Bundle/CPUBundle_common.cpp).
+add_executable(VTABundleOpsTest
+        VTABundleOpsTest.cpp
+        )
+target_link_libraries(VTABundleOpsTest gtest gtest_main VTABundle)
+set_target_properties(VTABundleOpsTest
+        PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${NESTC_BINARY_DIR}/tests"
+        )
